@@ -72,11 +72,7 @@ test_that("stringification collisions are caught", {
   expect_identical(err$code, "duplicate_key")
 })
 
-test_that("collection-valued keys are refused for now", {
-  # These become a zuyaml_map in M3 rather than being coerced into names.
-  err <- tryCatch(yaml_parse("? [one, two]\n: value\n"), zuyaml_error = identity)
-  expect_identical(err$code, "unsupported_key")
-})
+# Collection-valued keys are covered in test-complex-keys.R.
 
 test_that("max_depth is enforced by zuyaml, since cyaml ignores it", {
   # cyaml v0.1.3 declares opts.max_depth and never reads it: a document 20000

@@ -45,11 +45,10 @@ test_that("hex and octal integers are supported", {
   expect_identical(yaml_parse("0o17"), 15L)
 })
 
-test_that("integers beyond 2^53 are refused rather than rounded", {
-  # The package promises never to silently lose integer precision.
-  # zuyaml_bigint arrives in M3; until then this must error, not round.
-  err <- tryCatch(yaml_parse("9223372036854775807"), zuyaml_error = identity)
-  expect_identical(err$code, "not_implemented")
+test_that("integers beyond 2^53 are never silently rounded", {
+  # Full coverage of the policy lives in test-bigint.R; this pins the
+  # invariant at the point where scalars are classified.
+  expect_s3_class(yaml_parse("9223372036854775807"), "zuyaml_bigint")
 })
 
 test_that("floats convert, including the special values", {

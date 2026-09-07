@@ -88,8 +88,9 @@ static uint32_t as_uint32(SEXP x, const char* arg, SEXP path)
  * stream unconditionally is what makes it impossible to silently accept only
  * the first document.
  */
-SEXP zuyaml_parse_(SEXP x, SEXP simplify, SEXP aliases, SEXP duplicate_keys,
-    SEXP max_depth, SEXP max_size, SEXP max_nodes, SEXP path)
+SEXP zuyaml_parse_(SEXP x, SEXP simplify, SEXP aliases, SEXP big_integers,
+    SEXP duplicate_keys, SEXP max_depth, SEXP max_size, SEXP max_nodes,
+    SEXP path)
 {
     const char* src;
     size_t len;
@@ -132,6 +133,12 @@ SEXP zuyaml_parse_(SEXP x, SEXP simplify, SEXP aliases, SEXP duplicate_keys,
     ctx.alias_error = (strcmp(CHAR(STRING_ELT(aliases, 0)), "error") == 0);
     ctx.max_nodes = Rf_asReal(max_nodes);
     ctx.nodes = 0;
+    {
+        const char* bi = CHAR(STRING_ELT(big_integers, 0));
+        ctx.big_integers = (strcmp(bi, "double") == 0) ? ZUYAML_BIGINT_DOUBLE
+            : (strcmp(bi, "error") == 0)               ? ZUYAML_BIGINT_ERROR
+                                                       : ZUYAML_BIGINT_CLASS;
+    }
 
     /* cyaml v0.1.3 never reads opts.max_size either, so enforce it here,
        before handing the buffer to the parser. */

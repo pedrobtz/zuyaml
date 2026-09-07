@@ -1,3 +1,4 @@
+#include <inttypes.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -148,9 +149,50 @@ static SEXP scalar_string(const cyaml_doc_t* doc, const cyaml_node_t* node)
     return out;
 }
 
-static SEXP scalar_int(const cyaml_doc_t* doc, const cyaml_node_t* node)
+/*
+ * Build a zuyaml_bigint: a character vector carrying the *decimal*
+ * normalisation of the value.
+ *
+ * The source text is deliberately not reused. cyaml accepts 0x and 0o
+ * integers, so storing the raw span would yield "0xFFFFFFFFFFFFFFFF", which is
+ * useless for comparison and would not round-trip as an integer.
+ */
+static SEXP mk_bigint(const char* digits)
 {
+    SEXP out = PROTECT(Rf_mkString(digits));
+    SEXP cls = PROTECT(Rf_mkString("zuyaml_bigint"));
+    Rf_setAttrib(out, R_ClassSymbol, cls);
+    UNPROTECT(2);
+    return out;
+}
+
+/*
+ * Apply the big_integers policy to a value that cannot be held exactly by an R
+ * numeric type. `digits` is the decimal normalisation, `approx` the lossy
+ * double, already computed by the caller.
+ */
+static SEXP big_integer(zuyaml_ctx_t* ctx, const char* digits, double approx)
+{
+    switch (ctx->big_integers) {
+    case ZUYAML_BIGINT_DOUBLE:
+        return Rf_ScalarReal(approx);
+    case ZUYAML_BIGINT_ERROR:
+        zuyaml_stopf("precision", NULL,
+            "Integer %s cannot be represented exactly by an R numeric type; "
+            "set big_integers to \"bigint\" or \"double\".",
+            digits);
+    case ZUYAML_BIGINT_CLASS:
+    default:
+        return mk_bigint(digits);
+    }
+}
+
+static SEXP scalar_int(const cyaml_doc_t* doc, const cyaml_node_t* node,
+    zuyaml_ctx_t* ctx)
+{
+    char digits[32];
     int64_t v;
+    uint64_t uv;
 
     if (cyaml_as_int(doc, node, &v)) {
         /* NA_INTEGER is INT_MIN, so it is not available as a value. */
@@ -161,13 +203,38 @@ static SEXP scalar_int(const cyaml_doc_t* doc, const cyaml_node_t* node)
             && v <= (int64_t)ZUYAML_MAX_EXACT_DOUBLE) {
             return Rf_ScalarReal((double)v);
         }
+        snprintf(digits, sizeof(digits), "%" PRId64, v);
+        return big_integer(ctx, digits, (double)v);
     }
 
-    /* Beyond 2^53, or beyond int64 entirely. Converting here would silently
-       lose precision, which the package promises never to do. The
-       zuyaml_bigint representation arrives in M3. */
-    zuyaml_stopf("not_implemented", NULL,
-        "Integers beyond 2^53 are not supported yet (big_integers is M3).");
+    /* Above INT64_MAX, cyaml_as_int fails but cyaml_as_uint may succeed. */
+    if (cyaml_as_uint(doc, node, &uv)) {
+        if (uv <= (uint64_t)ZUYAML_MAX_EXACT_DOUBLE) {
+            return Rf_ScalarReal((double)uv);
+        }
+        snprintf(digits, sizeof(digits), "%" PRIu64, uv);
+        return big_integer(ctx, digits, (double)uv);
+    }
+
+    /* Beyond uint64 entirely. Only the source text is available, so it is used
+       as-is; such a literal is decimal in practice, since hex and octal forms
+       are handled above. */
+    {
+        const char* raw = cyaml_str(doc, node);
+        uint32_t raw_n = cyaml_len(node);
+        SEXP txt, out;
+
+        if (raw == NULL || raw_n == 0 || raw_n >= sizeof(digits)) {
+            /* Too long for the stack buffer: build it as an R string. */
+            txt = PROTECT(Rf_mkCharLenCE(raw ? raw : "", (int)raw_n, CE_UTF8));
+            out = PROTECT(big_integer(ctx, CHAR(txt), R_PosInf));
+            UNPROTECT(2);
+            return out;
+        }
+        memcpy(digits, raw, raw_n);
+        digits[raw_n] = '\0';
+        return big_integer(ctx, digits, atof(digits));
+    }
 }
 
 static SEXP scalar_double(const cyaml_doc_t* doc, const cyaml_node_t* node)
@@ -199,7 +266,8 @@ static SEXP scalar_bool(const cyaml_doc_t* doc, const cyaml_node_t* node)
  * Note that cyaml_is_null_val() would be the wrong function here -- it treats
  * an empty value as null, collapsing the quoted empty string.
  */
-static SEXP convert_scalar(const cyaml_doc_t* doc, const cyaml_node_t* node)
+static SEXP convert_scalar(const cyaml_doc_t* doc, const cyaml_node_t* node,
+    zuyaml_ctx_t* ctx)
 {
     switch (cyaml_scalar_kind(doc, node)) {
     case CYAML_KIND_NULL:
@@ -207,7 +275,7 @@ static SEXP convert_scalar(const cyaml_doc_t* doc, const cyaml_node_t* node)
     case CYAML_KIND_BOOL:
         return scalar_bool(doc, node);
     case CYAML_KIND_INT:
-        return scalar_int(doc, node);
+        return scalar_int(doc, node, ctx);
     case CYAML_KIND_FLOAT:
         return scalar_double(doc, node);
     case CYAML_KIND_STRING:
@@ -326,16 +394,75 @@ static SEXP convert_seq(const cyaml_doc_t* doc, const cyaml_node_t* node,
     return out;
 }
 
-/* Text of a mapping key, as a CHARSXP. */
+/* Text of a mapping key, as a CHARSXP. Callers ensure the key is a scalar. */
 static SEXP key_charsxp(const cyaml_doc_t* doc, const cyaml_node_t* key)
 {
-    if (key == NULL || key->type != CYAML_SCALAR) {
-        /* Sequence- and mapping-valued keys have no faithful named-list
-           representation; they become a zuyaml_map in M3. */
-        zuyaml_stopf("unsupported_key", NULL,
-            "Mapping keys that are not scalars are not supported yet.");
-    }
     return scalar_charsxp(doc, key);
+}
+
+/*
+ * Can every key of this mapping become a unique R name?
+ *
+ * Scalar keys can, after stringification. A sequence- or mapping-valued key
+ * cannot, and coercing it into a name would silently destroy structure, so
+ * such a mapping is represented as a zuyaml_map instead.
+ */
+static bool map_keys_are_scalar(const cyaml_node_t* node)
+{
+    uint32_t n = cyaml_map_len(node), i;
+
+    for (i = 0; i < n; i++) {
+        const cyaml_pair_t* pair = cyaml_map_at(node, i);
+        if (pair == NULL || pair->key == NULL
+            || pair->key->type != CYAML_SCALAR) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/*
+ * Mappings with collection-valued keys become a zuyaml_map: two parallel
+ * lists, chosen over a list of key/value pairs because both iteration and
+ * emission want keys and values separately.
+ *
+ * This is parse-only. cyaml_map_set() takes a null-terminated C string key and
+ * has no way to attach a key *node*, so such a mapping cannot be emitted; see
+ * the design's lossy-conversion table.
+ */
+static SEXP convert_complex_map(const cyaml_doc_t* doc,
+    const cyaml_node_t* node, zuyaml_ctx_t* ctx, const zuyaml_anc_t* anc)
+{
+    uint32_t n = cyaml_map_len(node), i;
+    zuyaml_anc_t frame = { node, anc };
+    SEXP keys, values, out, names, cls;
+
+    keys = PROTECT(Rf_allocVector(VECSXP, (R_xlen_t)n));
+    values = PROTECT(Rf_allocVector(VECSXP, (R_xlen_t)n));
+
+    for (i = 0; i < n; i++) {
+        const cyaml_pair_t* pair = cyaml_map_at(node, i);
+
+        SET_VECTOR_ELT(keys, (R_xlen_t)i,
+            zuyaml_convert_node(doc, pair->key, ctx, &frame));
+        SET_VECTOR_ELT(values, (R_xlen_t)i,
+            zuyaml_convert_node(doc, pair->val, ctx, &frame));
+    }
+
+    out = PROTECT(Rf_allocVector(VECSXP, 2));
+    SET_VECTOR_ELT(out, 0, keys);
+    SET_VECTOR_ELT(out, 1, values);
+
+    names = PROTECT(Rf_allocVector(STRSXP, 2));
+    SET_STRING_ELT(names, 0, Rf_mkChar("keys"));
+    SET_STRING_ELT(names, 1, Rf_mkChar("values"));
+    Rf_setAttrib(out, R_NamesSymbol, names);
+
+    cls = PROTECT(Rf_mkString("zuyaml_map"));
+    Rf_setAttrib(out, R_ClassSymbol, cls);
+
+    UNPROTECT(5);
+    return out;
 }
 
 static int cmp_cstr(const void* a, const void* b)
@@ -386,6 +513,10 @@ static SEXP convert_map(const cyaml_doc_t* doc, const cyaml_node_t* node,
     uint32_t n = cyaml_map_len(node), i;
     zuyaml_anc_t frame = { node, anc };
     SEXP out, names;
+
+    if (!map_keys_are_scalar(node)) {
+        return convert_complex_map(doc, node, ctx, anc);
+    }
 
     out = PROTECT(Rf_allocVector(VECSXP, (R_xlen_t)n));
     names = PROTECT(Rf_allocVector(STRSXP, (R_xlen_t)n));
@@ -487,7 +618,7 @@ SEXP zuyaml_convert_node(const cyaml_doc_t* doc, const cyaml_node_t* node,
         return R_NilValue;
 
     case CYAML_SCALAR:
-        return convert_scalar(doc, node);
+        return convert_scalar(doc, node, ctx);
 
     case CYAML_SEQ:
     case CYAML_MAP: {

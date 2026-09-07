@@ -29,6 +29,11 @@
 #'   unlimited. This is the limit that bounds alias expansion: a
 #'   billion-laughs document is small and shallow, so neither `max_size` nor
 #'   `max_depth` constrains it.
+#' @param big_integers How to represent integers too large for an R numeric
+#'   type to hold exactly (beyond 2^53). `"bigint"` (the default) returns a
+#'   [zuyaml_bigint] character vector holding the decimal value, `"double"` is
+#'   an explicit opt-in to lossy conversion, and `"error"` refuses the
+#'   document. The package never loses integer precision silently.
 #' @param duplicate_keys If `FALSE` (the default), a mapping with duplicate
 #'   keys is an error. If `TRUE`, duplicates become duplicate names in the
 #'   resulting list.
@@ -51,6 +56,7 @@ NULL
 yaml_parse <- function(x,
                        simplify = FALSE,
                        aliases = c("resolve", "error"),
+                       big_integers = c("bigint", "double", "error"),
                        duplicate_keys = FALSE,
                        max_depth = 128L,
                        max_size = 64 * 1024^2,
@@ -60,6 +66,7 @@ yaml_parse <- function(x,
     x,
     simplify = simplify,
     aliases = aliases,
+    big_integers = big_integers,
     duplicate_keys = duplicate_keys,
     max_depth = max_depth,
     max_size = max_size,
@@ -90,6 +97,7 @@ yaml_parse <- function(x,
 yaml_parse_all <- function(x,
                            simplify = FALSE,
                            aliases = c("resolve", "error"),
+                           big_integers = c("bigint", "double", "error"),
                            duplicate_keys = FALSE,
                            max_depth = 128L,
                            max_size = 64 * 1024^2,
@@ -98,6 +106,7 @@ yaml_parse_all <- function(x,
   check_input(x, path)
   check_flag(simplify, "simplify", path)
   aliases <- match.arg(aliases)
+  big_integers <- match.arg(big_integers)
   check_flag(duplicate_keys, "duplicate_keys", path)
   max_depth <- check_uint32(max_depth, "max_depth", path)
   max_size <- check_uint32(max_size, "max_size", path)
@@ -105,7 +114,7 @@ yaml_parse_all <- function(x,
   check_path(path)
 
   .Call(
-    zuyaml_parse_, x, simplify, aliases, duplicate_keys,
+    zuyaml_parse_, x, simplify, aliases, big_integers, duplicate_keys,
     max_depth, max_size, max_nodes, path
   )
 }

@@ -9,6 +9,7 @@ yaml_parse(
   x,
   simplify = FALSE,
   aliases = c("resolve", "error"),
+  big_integers = c("bigint", "double", "error"),
   duplicate_keys = FALSE,
   max_depth = 128L,
   max_size = 64 * 1024^2,
@@ -20,6 +21,7 @@ yaml_parse_all(
   x,
   simplify = FALSE,
   aliases = c("resolve", "error"),
+  big_integers = c("bigint", "double", "error"),
   duplicate_keys = FALSE,
   max_depth = 128L,
   max_size = 64 * 1024^2,
@@ -38,6 +40,12 @@ shape of the result never depends on the contents of the document.}
 \item{aliases}{How to treat YAML aliases. \code{"resolve"} (the default) replaces
 each alias with the value of its target; node identity is not preserved.
 \code{"error"} rejects any document containing an alias.}
+
+\item{big_integers}{How to represent integers too large for an R numeric
+type to hold exactly (beyond 2^53). \code{"bigint"} (the default) returns a
+\link{zuyaml_bigint} character vector holding the decimal value, \code{"double"} is
+an explicit opt-in to lossy conversion, and \code{"error"} refuses the
+document. The package never loses integer precision silently.}
 
 \item{duplicate_keys}{If \code{FALSE} (the default), a mapping with duplicate
 keys is an error. If \code{TRUE}, duplicates become duplicate names in the
