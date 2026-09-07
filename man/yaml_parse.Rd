@@ -8,18 +8,22 @@
 yaml_parse(
   x,
   simplify = FALSE,
+  aliases = c("resolve", "error"),
   duplicate_keys = FALSE,
   max_depth = 128L,
   max_size = 64 * 1024^2,
+  max_nodes = 1e+07,
   path = NULL
 )
 
 yaml_parse_all(
   x,
   simplify = FALSE,
+  aliases = c("resolve", "error"),
   duplicate_keys = FALSE,
   max_depth = 128L,
   max_size = 64 * 1024^2,
+  max_nodes = 1e+07,
   path = NULL
 )
 }
@@ -31,6 +35,10 @@ UTF-8 YAML bytes.}
 same type collapse to an atomic vector. The default is \code{FALSE}, so the
 shape of the result never depends on the contents of the document.}
 
+\item{aliases}{How to treat YAML aliases. \code{"resolve"} (the default) replaces
+each alias with the value of its target; node identity is not preserved.
+\code{"error"} rejects any document containing an alias.}
+
 \item{duplicate_keys}{If \code{FALSE} (the default), a mapping with duplicate
 keys is an error. If \code{TRUE}, duplicates become duplicate names in the
 resulting list.}
@@ -38,6 +46,11 @@ resulting list.}
 \item{max_depth}{Maximum nesting depth, or \code{0} for unlimited.}
 
 \item{max_size}{Maximum input size in bytes, or \code{0} for unlimited.}
+
+\item{max_nodes}{Maximum number of R values materialised, or \code{0} for
+unlimited. This is the limit that bounds alias expansion: a
+billion-laughs document is small and shallow, so neither \code{max_size} nor
+\code{max_depth} constrains it.}
 
 \item{path}{Optional file path, used only to make error messages more
 informative. Set by the file-reading functions in a later milestone.}

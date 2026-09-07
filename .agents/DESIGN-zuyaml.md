@@ -1417,8 +1417,14 @@ Decided above, but genuinely reversible — revisit before the API freezes:
 4. **`zuyaml_bigint` as public API** (§6.2). Once users receive it, its
    representation is a compatibility surface. An alternative is defaulting
    `big_integers = "error"` and shipping no class at all in v0.1.
-5. **`max_nodes = 1e7`** (§11.1). Chosen for order of magnitude, not measured. Set
-   it from the §18 benchmarks before release.
+5. **`max_nodes = 1e7`** (§11.1). Now partly measured, still unsettled. With the
+   default budget, a 293-byte billion-laughs payload expands to 4.7M nodes in
+   ~0.9s before completing successfully; one level deeper (9^8 leaves) trips the
+   limit in ~1.1s. So the defence works, but the default still lets a
+   sub-300-byte input cost about a second of CPU and a few hundred MB. A limit
+   of `1e6` would cut that tenfold and still admit very large legitimate
+   documents. Decide from the §18 benchmarks, using a real large manifest to
+   set the floor.
 6. **Whether `zuyaml_map` should exist in v0.1 at all** (§6.4). It cannot be
    emitted, so it is a parse-only asymmetry; erroring on collection keys would be
    simpler, at the cost of failing on documents `cyaml` handles fine.

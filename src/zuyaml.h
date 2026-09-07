@@ -44,8 +44,8 @@ _Noreturn void zuyaml_stopf(
     const char* code, SEXP path, const char* fmt, ...);
 
 /* .Call entry points (registered in init.c). */
-SEXP zuyaml_parse_(SEXP x, SEXP simplify, SEXP duplicate_keys,
-    SEXP max_depth, SEXP max_size, SEXP path);
+SEXP zuyaml_parse_(SEXP x, SEXP simplify, SEXP aliases, SEXP duplicate_keys,
+    SEXP max_depth, SEXP max_size, SEXP max_nodes, SEXP path);
 
 /*
  * Options threaded through the conversion recursion. Kept as a struct so that
@@ -55,12 +55,27 @@ SEXP zuyaml_parse_(SEXP x, SEXP simplify, SEXP duplicate_keys,
 typedef struct {
     bool simplify;
     bool duplicate_keys;
+    bool alias_error; /* aliases = "error" */
     uint32_t max_depth; /* 0 = unlimited */
     uint32_t depth; /* current nesting depth during conversion */
+    double max_nodes; /* 0 = unlimited */
+    double nodes; /* R nodes materialised so far */
 } zuyaml_ctx_t;
+
+/*
+ * Chain of nodes currently being converted, used to detect alias cycles.
+ *
+ * Each collection frame links a record on the C stack, so there is no
+ * allocation and nothing to free on an unwind. Walking the chain is O(depth),
+ * and depth is bounded by max_depth.
+ */
+typedef struct zuyaml_anc {
+    const cyaml_node_t* node;
+    const struct zuyaml_anc* parent;
+} zuyaml_anc_t;
 
 /* Conversion of a cyaml node to an R object. */
 SEXP zuyaml_convert_node(const cyaml_doc_t* doc, const cyaml_node_t* node,
-    zuyaml_ctx_t* ctx);
+    zuyaml_ctx_t* ctx, const zuyaml_anc_t* anc);
 
 #endif /* ZUYAML_H */

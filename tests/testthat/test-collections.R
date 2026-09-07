@@ -99,10 +99,4 @@ test_that("max_size is enforced by zuyaml, since cyaml ignores it", {
   expect_identical(yaml_parse("a: 1", max_size = 4), list(a = 1L))
 })
 
-test_that("aliases are not resolved yet", {
-  err <- tryCatch(
-    yaml_parse("a: &x 1\nb: *x\n"),
-    zuyaml_error = identity
-  )
-  expect_identical(err$code, "not_implemented")
-})
+# Alias behaviour is covered in test-aliases.R.

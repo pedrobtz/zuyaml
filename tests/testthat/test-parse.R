@@ -109,7 +109,7 @@ test_that("errors raised mid-conversion do not leak the stream", {
   # Repeat enough times that a leak per failure is obvious under ASan or
   # valgrind.
   for (i in 1:200) {
-    expect_error(yaml_parse("a: &x 1\nb: *x\n"), class = "zuyaml_error")
+    expect_error(yaml_parse("a: 1\na: 2\n"), class = "zuyaml_error")
   }
   gc()
   expect_true(TRUE)

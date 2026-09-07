@@ -305,9 +305,10 @@ static bool seq_is_scalar_only(const cyaml_node_t* node)
 }
 
 static SEXP convert_seq(const cyaml_doc_t* doc, const cyaml_node_t* node,
-    zuyaml_ctx_t* ctx)
+    zuyaml_ctx_t* ctx, const zuyaml_anc_t* anc)
 {
     uint32_t n = cyaml_seq_len(node), i;
+    zuyaml_anc_t frame = { node, anc };
     SEXP out;
 
     /* The length is known up front, so the container is allocated once
@@ -315,7 +316,7 @@ static SEXP convert_seq(const cyaml_doc_t* doc, const cyaml_node_t* node,
     out = PROTECT(Rf_allocVector(VECSXP, (R_xlen_t)n));
     for (i = 0; i < n; i++) {
         SET_VECTOR_ELT(out, (R_xlen_t)i,
-            zuyaml_convert_node(doc, cyaml_seq_get(node, i), ctx));
+            zuyaml_convert_node(doc, cyaml_seq_get(node, i), ctx, &frame));
     }
 
     if (ctx->simplify && seq_is_scalar_only(node)) {
@@ -380,9 +381,10 @@ static void check_unique_names(SEXP names)
 }
 
 static SEXP convert_map(const cyaml_doc_t* doc, const cyaml_node_t* node,
-    zuyaml_ctx_t* ctx)
+    zuyaml_ctx_t* ctx, const zuyaml_anc_t* anc)
 {
     uint32_t n = cyaml_map_len(node), i;
+    zuyaml_anc_t frame = { node, anc };
     SEXP out, names;
 
     out = PROTECT(Rf_allocVector(VECSXP, (R_xlen_t)n));
@@ -393,7 +395,7 @@ static SEXP convert_map(const cyaml_doc_t* doc, const cyaml_node_t* node,
 
         SET_STRING_ELT(names, (R_xlen_t)i, key_charsxp(doc, pair->key));
         SET_VECTOR_ELT(out, (R_xlen_t)i,
-            zuyaml_convert_node(doc, pair->val, ctx));
+            zuyaml_convert_node(doc, pair->val, ctx, &frame));
     }
 
     if (!ctx->duplicate_keys) {
@@ -413,12 +415,71 @@ static SEXP convert_map(const cyaml_doc_t* doc, const cyaml_node_t* node,
  * parse, but it must not fall through silently -- a new upstream node type
  * would otherwise be converted as whatever the default happened to be.
  */
+/*
+ * Resolve an alias to the value of its target.
+ *
+ * cyaml populates node->alias.target during parsing (the composer sets it), so
+ * this needs neither cyaml_find_anchor() nor cyaml_resolve_aliases(). Avoiding
+ * the latter is the point: it replaces every alias with a *deep copy* of its
+ * target, in C, with no budget -- which is precisely how a billion-laughs
+ * payload turns 200 bytes of source into gigabytes of memory. Resolving here
+ * means every expanded node is charged against max_nodes and the conversion
+ * aborts as soon as the budget runs out.
+ */
+static SEXP convert_alias(const cyaml_doc_t* doc, const cyaml_node_t* node,
+    zuyaml_ctx_t* ctx, const zuyaml_anc_t* anc)
+{
+    const cyaml_node_t* target = node->alias.target;
+    const zuyaml_anc_t* a;
+
+    if (ctx->alias_error) {
+        zuyaml_stopf("alias", NULL,
+            "Document contains a YAML alias and aliases = \"error\".");
+    }
+    if (target == NULL) {
+        zuyaml_stopf("alias", NULL,
+            "YAML alias does not resolve to a known anchor.");
+    }
+
+    /* A target that is also an ancestor is a cycle. Following it would
+       recurse forever; R lists cannot represent it either. */
+    for (a = anc; a != NULL; a = a->parent) {
+        if (a->node == target) {
+            /* The composer fills in node->anchor for an alias but leaves
+               node->span zeroed, so the anchor span is the only position
+               available. */
+            const cyaml_span_t* at = node->anchor.start_line ? &node->anchor
+                                                             : &node->span;
+            if (at->start_line > 0) {
+                zuyaml_stopf("alias_cycle", NULL,
+                    "YAML alias cycle detected at line %u, column %u.",
+                    (unsigned)at->start_line, (unsigned)at->start_col);
+            }
+            zuyaml_stopf("alias_cycle", NULL,
+                "YAML alias cycle detected; aliases cannot refer to a node "
+                "that contains them.");
+        }
+    }
+
+    return zuyaml_convert_node(doc, target, ctx, anc);
+}
+
 SEXP zuyaml_convert_node(const cyaml_doc_t* doc, const cyaml_node_t* node,
-    zuyaml_ctx_t* ctx)
+    zuyaml_ctx_t* ctx, const zuyaml_anc_t* anc)
 {
     /* An empty document has no root. */
     if (node == NULL) {
         return R_NilValue;
+    }
+
+    /* Charge every materialised node against the budget. This is what bounds
+       alias expansion: max_depth and max_size do not, because a billion-laughs
+       payload is small and shallow. */
+    ctx->nodes += 1;
+    if (ctx->max_nodes > 0 && ctx->nodes > ctx->max_nodes) {
+        zuyaml_stopf("limit_nodes", NULL,
+            "Document exceeds the node limit (%.0f); see max_nodes.",
+            ctx->max_nodes);
     }
 
     switch (node->type) {
@@ -442,15 +503,14 @@ SEXP zuyaml_convert_node(const cyaml_doc_t* doc, const cyaml_node_t* node,
                 (unsigned)ctx->max_depth);
         }
         ctx->depth++;
-        out = (node->type == CYAML_SEQ) ? convert_seq(doc, node, ctx)
-                                        : convert_map(doc, node, ctx);
+        out = (node->type == CYAML_SEQ) ? convert_seq(doc, node, ctx, anc)
+                                        : convert_map(doc, node, ctx, anc);
         ctx->depth--;
         return out;
     }
 
     case CYAML_ALIAS:
-        zuyaml_stopf("not_implemented", NULL,
-            "Alias resolution is not implemented yet.");
+        return convert_alias(doc, node, ctx, anc);
 
     case CYAML_NONE:
         break;

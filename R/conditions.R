@@ -84,3 +84,16 @@ check_path <- function(path) {
     code = "invalid_input"
   )
 }
+
+# max_nodes counts materialised values and can exceed R's integer range, so it
+# is validated as a non-negative count rather than a uint32.
+check_count <- function(value, arg, path) {
+  if (!is.numeric(value) || length(value) != 1L || is.na(value) || value < 0) {
+    zuyaml_abort(
+      sprintf("`%s` must be a single non-negative number.", arg),
+      code = "invalid_input",
+      path = path
+    )
+  }
+  as.double(value)
+}
