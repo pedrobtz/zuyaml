@@ -13,7 +13,7 @@ jobs:
   R-CMD-check:
     runs-on: ${{ matrix.config.os }}
 
-    name: ${{ matrix.config.os }} (${{ matrix.config.r }})
+    name: ${{ matrix.config.os }} (${{ matrix.config.r }}${{ matrix.config.cc && format(', {0}', matrix.config.cc) || '' }})
 
     strategy:
       fail-fast: false
@@ -24,6 +24,9 @@ jobs:
           - {os: ubuntu-latest,   r: 'devel', http-user-agent: 'release'}
           - {os: ubuntu-latest,   r: 'release'}
           - {os: ubuntu-latest,   r: 'oldrel-1'}
+          # The package vendors a C11 library, so both Linux compilers matter.
+          # Ubuntu defaults to GCC; this entry covers Clang.
+          - {os: ubuntu-latest,   r: 'release', cc: 'clang'}
 
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
@@ -31,6 +34,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      - name: Build with Clang
+        if: matrix.config.cc == 'clang'
+        run: |
+          mkdir -p ~/.R
+          printf 'CC=clang\nCFLAGS=-Wall -Wextra -pedantic -g -O2\n' >> ~/.R/Makevars
 
       - uses: r-lib/actions/setup-pandoc@v2
 
