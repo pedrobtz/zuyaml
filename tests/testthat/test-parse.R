@@ -1,0 +1,111 @@
+# M2 slice 1: stream parsing, document counting, error conditions, and the
+# unwind-safe scope. Scalar, sequence and mapping conversion arrive in the
+# next slices, so the tests here deliberately stop at null documents.
+
+test_that("a null document parses to NULL", {
+  expect_null(yaml_parse("null"))
+  expect_null(yaml_parse("~"))
+  expect_null(yaml_parse("---\nnull\n"))
+})
+
+test_that("raw input is accepted", {
+  expect_null(yaml_parse(charToRaw("null")))
+})
+
+test_that("yaml_parse_all always returns a list, one element per document", {
+  expect_identical(yaml_parse_all("null"), list(NULL))
+  expect_identical(yaml_parse_all("---\nnull\n---\nnull\n"), list(NULL, NULL))
+  expect_identical(yaml_parse_all(""), list())
+})
+
+test_that("yaml_parse rejects a stream that is not exactly one document", {
+  # Trailing documents must never be silently discarded.
+  expect_error(
+    yaml_parse("---\nnull\n---\nnull\n"),
+    "contains 2 documents"
+  )
+  err <- tryCatch(yaml_parse("---\nnull\n---\nnull\n"), zuyaml_error = identity)
+  expect_identical(err$code, "too_many_documents")
+})
+
+test_that("an empty stream is an error, not NULL", {
+  # NULL is the legitimate result of parsing `null`, so the two cases must be
+  # distinguishable.
+  err <- tryCatch(yaml_parse(""), zuyaml_error = identity)
+  expect_s3_class(err, "zuyaml_parse_error")
+  expect_identical(err$code, "no_documents")
+
+  # A comment-only input is also a zero-document stream.
+  err <- tryCatch(yaml_parse("# nothing here"), zuyaml_error = identity)
+  expect_identical(err$code, "no_documents")
+})
+
+test_that("parse errors carry a structured condition", {
+  err <- tryCatch(yaml_parse("a: [1, 2"), zuyaml_error = identity)
+
+  expect_s3_class(err, "zuyaml_parse_error")
+  expect_s3_class(err, "zuyaml_error")
+  expect_s3_class(err, "error")
+
+  # Callers must never have to parse the message to learn the category.
+  expect_type(err$code, "character")
+  expect_false(err$code %in% c("ok", "unknown"))
+  expect_type(err$line, "integer")
+  expect_type(err$column, "integer")
+  expect_gte(err$line, 1L)
+  expect_gte(err$column, 1L)
+  expect_match(conditionMessage(err), "^YAML parse error at line")
+})
+
+test_that("the file path appears in errors when supplied", {
+  err <- tryCatch(
+    yaml_parse("a: [1, 2", path = "config.yml"),
+    zuyaml_error = identity
+  )
+  expect_identical(err$path, "config.yml")
+  expect_match(conditionMessage(err), "in 'config.yml'")
+})
+
+test_that("cyaml does not detect duplicate keys (upstream gap)", {
+  # cyaml v0.1.3 declares cyaml_opts_t.dup_keys and defines CYAML_ERR_DUP_KEY
+  # with a strerror string, but the option is never read and the error is never
+  # raised -- `grep -r dup_keys src/` matches only the header. Duplicate-key
+  # rejection is therefore zuyaml's own job, implemented during mapping
+  # conversion, not something delegated to the parser.
+  #
+  # This test pins the upstream behaviour so that a future re-vendor which
+  # implements it shows up as a failure rather than silent double-checking.
+  expect_error(yaml_parse("a: 1\na: 2\n"), class = "zuyaml_error")
+  err <- tryCatch(yaml_parse("a: 1\na: 2\n"), zuyaml_error = identity)
+  expect_identical(err$code, "not_implemented")
+})
+
+test_that("invalid arguments are refused before reaching C", {
+  expect_error(yaml_parse(1L), "single string or a raw vector")
+  expect_error(yaml_parse(c("a", "b")), "single string or a raw vector")
+  expect_error(yaml_parse(NA_character_), "single string or a raw vector")
+  expect_error(yaml_parse("null", max_depth = -1), "between 0 and 4294967295")
+  expect_error(yaml_parse("null", max_depth = 2^33), "between 0 and 4294967295")
+  expect_error(yaml_parse("null", duplicate_keys = NA), "must be TRUE or FALSE")
+})
+
+test_that("max_depth is enforced", {
+  deep <- paste0(strrep("- ", 50), "null")
+  expect_error(yaml_parse(deep, max_depth = 4))
+})
+
+test_that("unimplemented node types fail cleanly rather than crashing", {
+  # Slice 1 converts null documents only. These must raise a proper condition
+  # -- which is also the path that exercises unwind safety: the error is
+  # raised while the cyaml stream is still alive.
+  err <- tryCatch(yaml_parse("a: 1"), zuyaml_error = identity)
+  expect_identical(err$code, "not_implemented")
+
+  # Repeat it enough that a leaked stream per failure would be obvious under
+  # a sanitizer or valgrind run.
+  for (i in 1:200) {
+    expect_error(yaml_parse("a: 1"))
+  }
+  gc()
+  expect_true(TRUE)
+})

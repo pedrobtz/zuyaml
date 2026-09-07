@@ -141,6 +141,15 @@ Expat-style streaming; `zuyaml` cannot.)
 attach an arbitrary key **node** to a map being built, and no way to build a map
 with duplicate keys. This bounds what `zuyaml` can emit (§7.5).
 
+**Duplicate-key detection is advertised but not implemented.** The README lists
+it, `cyaml_opts_t` declares `bool dup_keys`, and `CYAML_ERR_DUP_KEY` exists with
+a `cyaml_strerror()` string — but at v0.1.3 `grep -r dup_keys src/` matches the
+header and nothing else, and no code path raises that error. A document with
+duplicate keys parses successfully. **`zuyaml` must enforce duplicate-key
+rejection itself**, during mapping conversion (§6.4). Set `opts.dup_keys`
+anyway, so that a future upstream version honouring it agrees with our
+behaviour rather than fighting it.
+
 **The emitter does not quote ambiguous numerics.** `needs_quoting_ex()` in
 `cyaml_emitter.c` promotes a plain scalar to double-quoted for flow indicators,
 leading indicators, `---`/`...`, trailing `:`, line breaks, ` #`, `: `, and the
@@ -512,9 +521,13 @@ so in the documentation rather than implying otherwise.
 
 #### Duplicate keys
 
-Rejected by default, matching cyaml's own default (`cyaml_opts_t.dup_keys` is
-`false` in `CYAML_OPTS_DEFAULT`). With `duplicate_keys = TRUE`, duplicates become
-duplicate names in an R list:
+Rejected by default — **enforced by `zuyaml`, not by cyaml**. Upstream declares
+the option and the error code but implements neither (§3.1), so a document with
+duplicate keys parses cleanly and detection has to happen during mapping
+conversion: build the name vector, then check for duplicates before returning.
+This is cheap, since the names are being materialised anyway.
+
+With `duplicate_keys = TRUE`, duplicates become duplicate names in an R list:
 
 ```r
 list(a = 1L, a = 2L)
@@ -955,7 +968,7 @@ message strings to discover a category:
 | `CYAML_ERR_ANCHOR` | `"anchor"` |
 | `CYAML_ERR_ALIAS` | `"alias"` |
 | `CYAML_ERR_TAG` | `"tag"` |
-| `CYAML_ERR_DUP_KEY` | `"duplicate_key"` |
+| `CYAML_ERR_DUP_KEY` | `"duplicate_key"` — mapped, but never raised upstream at v0.1.3; `zuyaml` raises this code itself (§3.1, §6.4) |
 | `CYAML_ERR_NOMEM` | `"memory"` |
 | `CYAML_ERR_IO` | `"io"` |
 

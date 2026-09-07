@@ -4,7 +4,7 @@
 #include <R_ext/Rdynload.h>
 #include <R_ext/Visibility.h>
 
-#include "cyaml.h"
+#include "zuyaml.h"
 
 /*
  * Report the version string compiled into the vendored cyaml sources.
@@ -22,6 +22,7 @@ static SEXP zuyaml_cyaml_version_(void)
 
 static const R_CallMethodDef call_methods[] = {
     { "zuyaml_cyaml_version_", (DL_FUNC)&zuyaml_cyaml_version_, 0 },
+    { "zuyaml_parse_", (DL_FUNC)&zuyaml_parse_, 5 },
     { NULL, NULL, 0 }
 };
 

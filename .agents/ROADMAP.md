@@ -164,7 +164,11 @@ and optimising later.
   `as.numeric` methods, validating constructor, and all three `big_integers`
   policies.
 - Duplicate keys: rejection by default, opt-in duplicate names, and the
-  **stringification collision check** (`{1: a, "1": b}`).
+  **stringification collision check** (`{1: a, "1": b}`). Note this is
+  **zuyaml's own work, not a flag flip** — cyaml v0.1.3 advertises duplicate-key
+  detection but never implements it (design §3.1), discovered in M2 when the
+  option provably had no effect. Detection happens while building the name
+  vector during mapping conversion.
 - Collection-valued keys → `zuyaml_map`, two parallel lists.
 - Aliases: traversal-time resolution with a cycle guard, plus `aliases = "error"`.
 - Limits: `max_depth`, `max_size`, and `max_nodes` — including an actual
