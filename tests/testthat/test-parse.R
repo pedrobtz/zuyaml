@@ -66,18 +66,24 @@ test_that("the file path appears in errors when supplied", {
   expect_match(conditionMessage(err), "in 'config.yml'")
 })
 
-test_that("cyaml does not detect duplicate keys (upstream gap)", {
+test_that("duplicate-key rejection comes from zuyaml, not cyaml", {
   # cyaml v0.1.3 declares cyaml_opts_t.dup_keys and defines CYAML_ERR_DUP_KEY
   # with a strerror string, but the option is never read and the error is never
-  # raised -- `grep -r dup_keys src/` matches only the header. Duplicate-key
-  # rejection is therefore zuyaml's own job, implemented during mapping
-  # conversion, not something delegated to the parser.
+  # raised -- `grep -r dup_keys src/` matches only the header. Rejection is
+  # therefore zuyaml's own work, done while building the name vector.
   #
-  # This test pins the upstream behaviour so that a future re-vendor which
-  # implements it shows up as a failure rather than silent double-checking.
-  expect_error(yaml_parse("a: 1\na: 2\n"), class = "zuyaml_error")
+  # Errors raised during conversion carry no source span, whereas a cyaml parse
+  # error does. That difference pins which layer rejected the document: if a
+  # future re-vendor implements detection upstream, `line` becomes non-NULL and
+  # this test fails, prompting a re-read of the design's verification note.
   err <- tryCatch(yaml_parse("a: 1\na: 2\n"), zuyaml_error = identity)
-  expect_identical(err$code, "not_implemented")
+  expect_identical(err$code, "duplicate_key")
+  expect_null(err$line)
+  expect_null(err$column)
+
+  # By contrast, a genuine cyaml parse error does carry a position.
+  syntax <- tryCatch(yaml_parse("a: [1, 2"), zuyaml_error = identity)
+  expect_type(syntax$line, "integer")
 })
 
 test_that("invalid arguments are refused before reaching C", {
@@ -91,20 +97,19 @@ test_that("invalid arguments are refused before reaching C", {
 
 test_that("max_depth is enforced", {
   deep <- paste0(strrep("- ", 50), "null")
-  expect_error(yaml_parse(deep, max_depth = 4))
+  err <- tryCatch(yaml_parse(deep, max_depth = 4), zuyaml_error = identity)
+  expect_identical(err$code, "limit_depth")
 })
 
-test_that("unimplemented node types fail cleanly rather than crashing", {
-  # Slice 1 converts null documents only. These must raise a proper condition
-  # -- which is also the path that exercises unwind safety: the error is
-  # raised while the cyaml stream is still alive.
-  err <- tryCatch(yaml_parse("a: 1"), zuyaml_error = identity)
-  expect_identical(err$code, "not_implemented")
-
-  # Repeat it enough that a leaked stream per failure would be obvious under
-  # a sanitizer or valgrind run.
+test_that("errors raised mid-conversion do not leak the stream", {
+  # The error below is raised while the cyaml stream is still alive, so it
+  # exercises the unwind path: R's longjmp skips the explicit free and the
+  # external-pointer finalizer has to reclaim it.
+  #
+  # Repeat enough times that a leak per failure is obvious under ASan or
+  # valgrind.
   for (i in 1:200) {
-    expect_error(yaml_parse("a: 1"))
+    expect_error(yaml_parse("a: &x 1\nb: *x\n"), class = "zuyaml_error")
   }
   gc()
   expect_true(TRUE)

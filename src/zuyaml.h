@@ -44,10 +44,23 @@ _Noreturn void zuyaml_stopf(
     const char* code, SEXP path, const char* fmt, ...);
 
 /* .Call entry points (registered in init.c). */
-SEXP zuyaml_parse_(SEXP x, SEXP duplicate_keys, SEXP max_depth,
-    SEXP max_size, SEXP path);
+SEXP zuyaml_parse_(SEXP x, SEXP simplify, SEXP duplicate_keys,
+    SEXP max_depth, SEXP max_size, SEXP path);
+
+/*
+ * Options threaded through the conversion recursion. Kept as a struct so that
+ * later milestones (alias policy, big-integer policy, node budget) add fields
+ * rather than parameters to every function.
+ */
+typedef struct {
+    bool simplify;
+    bool duplicate_keys;
+    uint32_t max_depth; /* 0 = unlimited */
+    uint32_t depth; /* current nesting depth during conversion */
+} zuyaml_ctx_t;
 
 /* Conversion of a cyaml node to an R object. */
-SEXP zuyaml_convert_node(const cyaml_doc_t* doc, const cyaml_node_t* node);
+SEXP zuyaml_convert_node(const cyaml_doc_t* doc, const cyaml_node_t* node,
+    zuyaml_ctx_t* ctx);
 
 #endif /* ZUYAML_H */

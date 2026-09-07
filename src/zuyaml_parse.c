@@ -88,8 +88,8 @@ static uint32_t as_uint32(SEXP x, const char* arg, SEXP path)
  * stream unconditionally is what makes it impossible to silently accept only
  * the first document.
  */
-SEXP zuyaml_parse_(SEXP x, SEXP duplicate_keys, SEXP max_depth, SEXP max_size,
-    SEXP path)
+SEXP zuyaml_parse_(SEXP x, SEXP simplify, SEXP duplicate_keys, SEXP max_depth,
+    SEXP max_size, SEXP path)
 {
     const char* src;
     size_t len;
@@ -98,6 +98,7 @@ SEXP zuyaml_parse_(SEXP x, SEXP duplicate_keys, SEXP max_depth, SEXP max_size,
     cyaml_stream_t* stream;
     uint32_t n_docs, i;
     SEXP owner, out;
+    zuyaml_ctx_t ctx;
 
     src = input_bytes(x, &len, path);
 
@@ -124,6 +125,19 @@ SEXP zuyaml_parse_(SEXP x, SEXP duplicate_keys, SEXP max_depth, SEXP max_size,
     opts.max_size = as_uint32(max_size, "max_size", path);
     opts.spec = CYAML_SPEC_1_2;
 
+    ctx.simplify = (Rf_asLogical(simplify) == TRUE);
+    ctx.duplicate_keys = opts.dup_keys;
+    ctx.max_depth = opts.max_depth;
+    ctx.depth = 0;
+
+    /* cyaml v0.1.3 never reads opts.max_size either, so enforce it here,
+       before handing the buffer to the parser. */
+    if (opts.max_size > 0 && len > (size_t)opts.max_size) {
+        zuyaml_stopf("limit_size", path,
+            "Input is %.0f bytes, which exceeds max_size (%u).",
+            (double)len, (unsigned)opts.max_size);
+    }
+
     stream = cyaml_parse_stream(src, len, &opts, &err);
     if (stream == NULL) {
         zuyaml_stop_parse_error(&err, path);
@@ -140,7 +154,7 @@ SEXP zuyaml_parse_(SEXP x, SEXP duplicate_keys, SEXP max_depth, SEXP max_size,
     for (i = 0; i < n_docs; i++) {
         cyaml_doc_t* doc = cyaml_stream_doc(stream, i);
         SET_VECTOR_ELT(out, (R_xlen_t)i,
-            zuyaml_convert_node(doc, cyaml_root(doc)));
+            zuyaml_convert_node(doc, cyaml_root(doc), &ctx));
     }
 
     zuyaml_stream_release(owner);

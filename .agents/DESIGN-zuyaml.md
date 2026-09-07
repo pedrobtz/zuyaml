@@ -12,11 +12,15 @@ The design baseline is **cyaml v0.1.3**, tag commit
 `0672e81b809bc3dfd1d4f57ba0fcfbb20c60ae70`. The vendored upstream version must be
 pinned explicitly; `zuyaml` must not silently track upstream `main`.
 
-> **Verification note.** Every claim in this document about cyaml's API, defaults,
-> and behaviour was checked against `src/cyaml.h`, `src/cyaml_internal.h`, and
-> `src/cyaml_emitter.c` at the tag above. Where upstream behaviour constrains or
-> contradicts an otherwise attractive design choice, that is called out inline.
-> Re-run this verification whenever the vendored version changes (§13).
+> **Verification note.** Every claim in this document about cyaml's API,
+> defaults, and behaviour was checked against the vendored source at the tag
+> above, and the behavioural ones were confirmed by running the library.
+>
+> That distinction matters: three documented `cyaml_opts_t` options are
+> declared in the public header, described in the README, and never read by any
+> code path (§3.1). Reading headers is not enough — **grep for each option in
+> the implementation, and write a test that proves the behaviour**. Re-run this
+> whenever the vendored version changes (§13).
 
 ---
 
@@ -114,12 +118,14 @@ Verified properties at v0.1.3:
   buffer, with 1-based line/column start and end;
 - core-schema scalar classification (`cyaml_scalar_kind`);
 - anchors and aliases with cycle detection;
-- duplicate-key detection, strict by default;
-- configurable maximum depth and source size;
 - style and comment preservation facilities;
 - YPATH querying;
 - MIT license;
 - upstream `yaml-test-suite` validation.
+
+Upstream also advertises duplicate-key detection and configurable depth/size
+limits. **Those are not implemented at v0.1.3** — see §3.1. They are listed
+here as a warning, not as properties to rely on.
 
 Its test/reference submodules (`third-party/Unity`, `refs/yaml-test-suite`,
 `refs/yaml-spec`) are **not** required to build the library — vendoring needs only
@@ -127,7 +133,9 @@ Its test/reference submodules (`third-party/Unity`, `refs/yaml-test-suite`,
 
 ### 3.1 What cyaml does not give us
 
-Three limits shape this design and are easy to assume away:
+Four limits shape this design. Each was found by testing behaviour rather than
+by reading the header or the README, which is why the verification note above
+insists on re-checking after every re-vendor:
 
 **Event output is not SAX parsing.** `cyaml_events()` and `cyaml_stream_events()`
 produce a *textual* event representation from an already-parsed document. They are
@@ -141,14 +149,33 @@ Expat-style streaming; `zuyaml` cannot.)
 attach an arbitrary key **node** to a map being built, and no way to build a map
 with duplicate keys. This bounds what `zuyaml` can emit (§7.5).
 
-**Duplicate-key detection is advertised but not implemented.** The README lists
-it, `cyaml_opts_t` declares `bool dup_keys`, and `CYAML_ERR_DUP_KEY` exists with
-a `cyaml_strerror()` string — but at v0.1.3 `grep -r dup_keys src/` matches the
-header and nothing else, and no code path raises that error. A document with
-duplicate keys parses successfully. **`zuyaml` must enforce duplicate-key
-rejection itself**, during mapping conversion (§6.4). Set `opts.dup_keys`
-anyway, so that a future upstream version honouring it agrees with our
-behaviour rather than fighting it.
+**Most of `cyaml_opts_t` is declared but not implemented.** This is the single
+most consequential gap, and it is invisible from the header. Of the five option
+fields, only two are ever read by the library:
+
+| field | read by cyaml at v0.1.3? |
+|---|---|
+| `spec` | **yes** — `cyaml_parser.c` |
+| `preserve_comments` | **yes** — `cyaml_parser.c` |
+| `dup_keys` | **no** — declared in the header, read nowhere |
+| `max_depth` | **no** — declared in the header, read nowhere |
+| `max_size` | **no** — declared in the header, read nowhere |
+
+`CYAML_ERR_DUP_KEY` likewise exists, has a `cyaml_strerror()` string, and is
+never raised. Verified empirically: a document with duplicate keys parses
+cleanly, and one nested 20,000 levels deep parses cleanly with
+`max_depth = 10`.
+
+**`zuyaml` must therefore implement all three itself** — duplicate-key
+rejection during mapping conversion (§6.4), and `max_depth` / `max_size` as
+described in §11. Set the upstream fields anyway, so a future version that
+honours them agrees with our behaviour rather than fighting it.
+
+Empirically, cyaml's own parser survives 100,000 levels of flow nesting without
+crashing, so the absence of `max_depth` is not a stack-overflow risk *inside
+cyaml*. The risk is on our side: a recursive R conversion of such a document
+exhausts R's protection stack. Enforcing depth during conversion addresses
+both.
 
 **The emitter does not quote ambiguous numerics.** `needs_quoting_ex()` in
 `cyaml_emitter.c` promotes a plain scalar to double-quoted for flow indicators,
@@ -989,15 +1016,27 @@ user-visible:
 
 | argument | default | enforced by |
 |---|---|---|
-| `max_depth` | `128L` | `cyaml_opts_t.max_depth` **and** R-side recursion guard |
-| `max_size` | `64 * 1024^2` | `cyaml_opts_t.max_size` |
-| `max_nodes` | `1e7` | `zuyaml` conversion budget |
+| `max_depth` | `128L` | **`zuyaml`**, during conversion |
+| `max_size` | `64 * 1024^2` | **`zuyaml`**, before parsing |
+| `max_nodes` | `1e7` | **`zuyaml`**, conversion budget |
 
-Upstream's own defaults (`CYAML_OPTS_DEFAULT`) are `max_depth = 1000`,
-`max_size = 0` (unlimited), `spec = CYAML_SPEC_AUTO`. All three are overridden
-deliberately; none may be left to `{0}` initialisation by accident. Benchmark the
-defaults against legitimately large documents before release, but never ship
-unlimited by accident.
+**All three limits are ours.** cyaml declares `max_depth` and `max_size` and
+reads neither (§3.1), so setting the upstream fields protects nothing. Passing
+them through and assuming they work is the failure mode this table exists to
+prevent:
+
+- `max_size` is checked against the input length before the buffer is handed
+  to the parser.
+- `max_depth` is checked as the conversion recurses, which also bounds our own
+  use of R's protection stack.
+- `max_nodes` is charged as R nodes are materialised, including nodes produced
+  by alias expansion (§11.1).
+
+`CYAML_OPTS_DEFAULT` is `{ false, false, 1000, 0, CYAML_SPEC_AUTO }`. The
+`spec` field is the one option that genuinely matters upstream, and pinning it
+to `CYAML_SPEC_1_2` is load-bearing. Benchmark the numeric defaults against
+legitimately large documents before release, but never ship unlimited by
+accident.
 
 ### 11.1 Alias expansion
 
@@ -1344,9 +1383,10 @@ exists.
 | Sequences | list; `simplify = FALSE` by default |
 | Scalar-key maps | named list, keys stringified |
 | Collection-key maps | `zuyaml_map`, parse only |
-| Duplicate keys | reject by default; parse only when enabled |
+| Duplicate keys | reject by default (zuyaml-enforced); parse only when enabled |
 | Aliases | resolve during traversal, budgeted |
 | Alias cycles / bombs | error / `max_nodes` |
+| Resource limits | all three enforced by zuyaml, not cyaml |
 | Large integers | never silently lose precision; `zuyaml_bigint` |
 | Emit scalar style | chosen by `zuyaml`, not left to upstream |
 | `NA` | `null`, documented as lossy |

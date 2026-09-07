@@ -22,7 +22,7 @@ static SEXP zuyaml_cyaml_version_(void)
 
 static const R_CallMethodDef call_methods[] = {
     { "zuyaml_cyaml_version_", (DL_FUNC)&zuyaml_cyaml_version_, 0 },
-    { "zuyaml_parse_", (DL_FUNC)&zuyaml_parse_, 5 },
+    { "zuyaml_parse_", (DL_FUNC)&zuyaml_parse_, 6 },
     { NULL, NULL, 0 }
 };
 

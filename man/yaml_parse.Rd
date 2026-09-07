@@ -7,6 +7,7 @@
 \usage{
 yaml_parse(
   x,
+  simplify = FALSE,
   duplicate_keys = FALSE,
   max_depth = 128L,
   max_size = 64 * 1024^2,
@@ -15,6 +16,7 @@ yaml_parse(
 
 yaml_parse_all(
   x,
+  simplify = FALSE,
   duplicate_keys = FALSE,
   max_depth = 128L,
   max_size = 64 * 1024^2,
@@ -24,6 +26,10 @@ yaml_parse_all(
 \arguments{
 \item{x}{A length-one character vector containing YAML, or a raw vector of
 UTF-8 YAML bytes.}
+
+\item{simplify}{If \code{TRUE}, sequences whose elements are all scalars of the
+same type collapse to an atomic vector. The default is \code{FALSE}, so the
+shape of the result never depends on the contents of the document.}
 
 \item{duplicate_keys}{If \code{FALSE} (the default), a mapping with duplicate
 keys is an error. If \code{TRUE}, duplicates become duplicate names in the
