@@ -387,11 +387,8 @@ static cyaml_node_t* build_node(cyaml_doc_t* doc, SEXP x)
     }
     if (Rf_isFactor(x)) {
         /* Labels, never the internal integer codes. */
-        SEXP levels = Rf_getAttrib(x, R_LevelsSymbol);
         SEXP chr = PROTECT(Rf_asCharacterFactor(x));
-        cyaml_node_t* out;
-        (void)levels;
-        out = build_node(doc, chr);
+        cyaml_node_t* out = build_node(doc, chr);
         UNPROTECT(1);
         return out;
     }
@@ -417,14 +414,20 @@ static cyaml_node_t* build_node(cyaml_doc_t* doc, SEXP x)
             cls != R_NilValue ? CHAR(STRING_ELT(cls, 0)) : "?");
     }
 
-    names = Rf_getAttrib(x, R_NamesSymbol);
+    /* PROTECT is required, not defensive: Rf_getAttrib() may allocate, and
+       build_map() allocates, so an unprotected result could be collected
+       mid-build. rchk flags exactly this pattern. */
+    names = PROTECT(Rf_getAttrib(x, R_NamesSymbol));
 
     if (names != R_NilValue) {
         /* An empty but named list is the way to ask for {}; list() alone is
            ambiguous and emits as [] (see the design's empty-containers
            section). */
-        return build_map(doc, x, names);
+        cyaml_node_t* map = build_map(doc, x, names);
+        UNPROTECT(1);
+        return map;
     }
+    UNPROTECT(1);
     if (TYPEOF(x) != VECSXP && XLENGTH(x) == 1) {
         return build_element(doc, x, 0);
     }
