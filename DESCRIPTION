@@ -13,7 +13,8 @@ Description: Converts between YAML 1.2 and ordinary R objects using a
     runtime dependencies beyond R.
 License: MIT + file LICENSE
 Copyright: file inst/COPYRIGHTS
-URL: https://github.com/pedrobtz/zuyaml
+URL: https://github.com/pedrobtz/zuyaml,
+    https://pedrobtz.github.io/zuyaml/
 BugReports: https://github.com/pedrobtz/zuyaml/issues
 Encoding: UTF-8
 Language: en-GB
@@ -25,5 +26,4 @@ Suggests:
     rmarkdown,
     testthat (>= 3.0.0),
     withr
-VignetteBuilder: knitr
 Config/testthat/edition: 3

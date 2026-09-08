@@ -1,10 +1,5 @@
 ---
 title: "Converting between YAML and R"
-output: rmarkdown::html_vignette
-vignette: >
-  %\VignetteIndexEntry{Converting between YAML and R}
-  %\VignetteEngine{knitr::rmarkdown}
-  %\VignetteEncoding{UTF-8}
 ---
 
 ```{r, include = FALSE}
@@ -15,10 +10,29 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(zuyaml)
 ```
 
-`zuyaml` converts between YAML 1.2 and ordinary R objects. This vignette
+`zuyaml` converts between YAML 1.2 and ordinary R objects. This article
 documents the conversion rules, which are part of the package's contract: they
 are meant to be predictable rather than clever, and every place where
 information is lost is listed at the end.
+
+## Why another YAML package
+
+R already has the mature [`yaml`](https://cran.r-project.org/package=yaml)
+package, built on LibYAML. `zuyaml` is not a re-spelling of it. The differences
+are deliberate:
+
+- **YAML 1.2 core schema**, not 1.1 --- `yes` and `no` are strings.
+- **Strict by default** --- duplicate keys are rejected and partially named
+  lists refuse to emit. Application tags are ignored unless you ask for
+  `tags = "error"`.
+- **Explicit multi-document handling** --- a YAML *stream* and a YAML *sequence*
+  are different things, and the API keeps them apart.
+- **No silent precision loss** --- integers beyond 2^53 are preserved rather
+  than quietly rounded.
+- **No system dependency** --- the C library is bundled and pinned.
+
+If you want compatibility with the existing `yaml` package's behaviour, use that
+package. `zuyaml` optimises for predictability instead.
 
 ## The API
 
