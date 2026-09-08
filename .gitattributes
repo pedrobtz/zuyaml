@@ -1,0 +1,10 @@
+# The yaml-test-suite fixtures are byte-exact test data. Line endings are part
+# of what those cases check -- several distinguish \n from \r\n inside block
+# scalars -- so git must not translate them on checkout. Without this, the
+# semantic conformance test fails on Windows, where core.autocrlf is on by
+# default and the fixtures arrive with CRLF.
+tests/testthat/fixtures/** -text
+
+# C sources keep LF on every platform; R CMD check inspects their line endings.
+*.c text eol=lf
+*.h text eol=lf
