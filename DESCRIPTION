@@ -20,6 +20,7 @@ Language: en-GB
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 8.0.0
 Suggests:
+    jsonlite,
     knitr,
     rmarkdown,
     testthat (>= 3.0.0),

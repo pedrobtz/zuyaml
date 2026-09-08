@@ -6,8 +6,9 @@
 #
 # Usage:  Rscript tools/curate-test-suite.R /path/to/yaml-test-suite
 #
-# Only `===`, `in.yaml` and the `error` marker are copied; the event and JSON
-# files are not used by these tests.
+# `===`, `in.yaml`, the `error` marker and `in.json` are copied. The JSON is
+# the suite's own reference rendering of the document, used by the semantic
+# conformance test; the event files are not used.
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) != 1L) stop("usage: curate-test-suite.R <suite-dir>")
@@ -76,6 +77,9 @@ for (d in picked) {
   }
   if (file.exists(file.path(d, "error"))) {
     file.create(file.path(out, "error"))
+  }
+  if (file.exists(file.path(d, "in.json"))) {
+    file.copy(file.path(d, "in.json"), file.path(out, "in.json"))
   }
 }
 

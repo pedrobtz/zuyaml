@@ -87,34 +87,52 @@ static bool has_nul_escape(const char* p, size_t n)
 /*
  * Convert a scalar node's text to an R character vector.
  *
- * Plain scalars take the zero-copy path: cyaml_str()/cyaml_len() point
- * straight into the source buffer, so the text goes to Rf_mkCharLenCE() with
- * no intermediate allocation. Only styles that need processing -- escapes,
- * line folding, block indent stripping -- pay for cyaml_scalar_str(), which
- * mallocs and must be freed.
+ * Single-line plain scalars take the zero-copy path: cyaml_str()/cyaml_len()
+ * point straight into the source buffer, so the text goes to
+ * Rf_mkCharLenCE() with no intermediate allocation. Since such scalars
+ * dominate real documents, this removes most of the per-scalar malloc/free
+ * traffic.
  *
- * Since plain scalars dominate real documents, this removes most of the
- * per-scalar malloc/free traffic.
+ * Everything else goes through cyaml_scalar_str(), which mallocs and must be
+ * freed, but applies the processing the value needs.
+ *
+ * The line check is essential, not an optimisation detail. A *plain* scalar
+ * may still span several lines, and YAML folds those breaks into spaces:
+ *
+ *     plain: This unquoted scalar
+ *       spans two lines
+ *
+ * is the single value "This unquoted scalar spans two lines". Taking the raw
+ * span there returns the newline and the indentation verbatim. Plain scalars
+ * have no escapes, so a span with no line break needs no processing at all --
+ * but one with a break needs folding.
  */
+static bool spans_lines(const char* p, uint32_t n)
+{
+    /* memchr is declared nonnull, so an empty span must not reach it. */
+    if (p == NULL || n == 0) {
+        return false;
+    }
+    return memchr(p, '\n', (size_t)n) != NULL
+        || memchr(p, '\r', (size_t)n) != NULL;
+}
+
 static SEXP scalar_charsxp(const cyaml_doc_t* doc, const cyaml_node_t* node)
 {
-    if (node->style == CYAML_PLAIN) {
-        const char* p = cyaml_str(doc, node);
-        uint32_t n = cyaml_len(node);
+    const char* raw = cyaml_str(doc, node);
+    uint32_t raw_n = cyaml_len(node);
 
-        if (p == NULL || n == 0) {
+    if (node->style == CYAML_PLAIN && !spans_lines(raw, raw_n)) {
+        if (raw == NULL || raw_n == 0) {
             return Rf_mkCharLenCE("", 0, CE_UTF8);
         }
-        check_no_nul(p, (size_t)n);
-        return Rf_mkCharLenCE(p, (int)n, CE_UTF8);
+        check_no_nul(raw, (size_t)raw_n);
+        return Rf_mkCharLenCE(raw, (int)raw_n, CE_UTF8);
     }
 
     /* Check the raw span before decoding: cyaml_scalar_str() would truncate
        a NUL-producing escape without telling us. */
     {
-        const char* raw = cyaml_str(doc, node);
-        uint32_t raw_n = cyaml_len(node);
-
         if (raw != NULL && raw_n > 0) {
             check_no_nul(raw, (size_t)raw_n);
             if (node->style == CYAML_DOUBLE
@@ -269,6 +287,15 @@ static SEXP scalar_bool(const cyaml_doc_t* doc, const cyaml_node_t* node)
 static SEXP convert_scalar(const cyaml_doc_t* doc, const cyaml_node_t* node,
     zuyaml_ctx_t* ctx)
 {
+    /* Only *plain* scalars are resolved against the schema. Quoted, literal
+       and folded scalars are strings by construction, whatever their text
+       looks like. cyaml_scalar_kind() gets the quoted cases right but reports
+       an empty block scalar as null, so `key: >-` with no content would come
+       back as NULL instead of "". */
+    if (node->style != CYAML_PLAIN) {
+        return scalar_string(doc, node);
+    }
+
     switch (cyaml_scalar_kind(doc, node)) {
     case CYAML_KIND_NULL:
         return R_NilValue;
@@ -394,10 +421,31 @@ static SEXP convert_seq(const cyaml_doc_t* doc, const cyaml_node_t* node,
     return out;
 }
 
+/*
+ * Follow an alias to the node it names.
+ *
+ * A key may be an alias -- `*anchor : value` is legal -- and what matters for
+ * deciding whether a mapping fits a named list is what the alias *resolves
+ * to*, not that it is an alias. Without this, one aliased key turned an
+ * ordinary mapping into a zuyaml_map.
+ *
+ * The step count bounds a cyclic chain; a cycle among keys is refused when the
+ * value side is converted.
+ */
+static const cyaml_node_t* follow_alias(const cyaml_node_t* n)
+{
+    int steps = 0;
+
+    while (n != NULL && n->type == CYAML_ALIAS && steps++ < 64) {
+        n = n->alias.target;
+    }
+    return n;
+}
+
 /* Text of a mapping key, as a CHARSXP. Callers ensure the key is a scalar. */
 static SEXP key_charsxp(const cyaml_doc_t* doc, const cyaml_node_t* key)
 {
-    return scalar_charsxp(doc, key);
+    return scalar_charsxp(doc, follow_alias(key));
 }
 
 /*
@@ -413,8 +461,9 @@ static bool map_keys_are_scalar(const cyaml_node_t* node)
 
     for (i = 0; i < n; i++) {
         const cyaml_pair_t* pair = cyaml_map_at(node, i);
-        if (pair == NULL || pair->key == NULL
-            || pair->key->type != CYAML_SCALAR) {
+        const cyaml_node_t* key = pair ? follow_alias(pair->key) : NULL;
+
+        if (key == NULL || key->type != CYAML_SCALAR) {
             return false;
         }
     }

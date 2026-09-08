@@ -103,11 +103,10 @@ trip, and the three options that do nothing.
 ### Blocking a 1.0
 
 - **ASan/UBSan green run** — fixed but unobserved (M6 exit criterion).
-- **Semantic conformance.** The conformance tests assert only that valid
-  documents parse and invalid ones fail. The `in.json` comparison both the
-  design and roadmap specify — checking the parsed object against the suite's
-  own reference — is not implemented. So the suite proves the package accepts
-  and rejects the right *documents*, never that it produces the right *values*.
+- **Tag handling.** Design §6.6 specifies that core tags take part in scalar
+  conversion and that unknown tags error. Neither is implemented: `!!str 12`
+  parses as the integer 12, and an unknown tag is silently ignored. Found by
+  the semantic conformance comparison, which now records it as a known gap.
 - **Three open questions** (design §22): key stringification, eight-versus-five
   functions, and whether `zuyaml_bigint` and `zuyaml_map` belong in 1.0. All are
   breaking changes afterwards.

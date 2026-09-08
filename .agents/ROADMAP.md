@@ -264,11 +264,18 @@ files and raw bodies without reaching into internals.
 - ✅ No leaks on repeated failure paths — as far as a plain R heap check can
   show. The real evidence is the ASan run above, so this is provisional.
 - ✅ Benchmark numbers recorded; no performance claim is made anywhere.
-- ❌ **Semantic conformance.** The tests assert only that valid documents parse
-  and invalid ones fail. The `in.json` comparison this milestone specifies —
-  checking the parsed R object against the suite's own JSON equivalent — is not
-  implemented, so *what* a document parses to is verified only by the package's
-  own tests, never against an external reference.
+- ✅ **Semantic conformance.** Implemented. Parsed objects are compared against
+  the suite's `in.json` rendering: **970 of 990** single-document cases agree,
+  and every remaining difference is listed with a reason. It found three real
+  conversion bugs the accept/reject tests could not: unfolded multi-line plain
+  scalars, empty block scalars returning `NULL`, and an alias used as a mapping
+  key collapsing the whole mapping into a `zuyaml_map`.
+
+  Not compared: multi-document cases, whose `in.json` concatenates one value
+  per document and needs an incremental parser to split. Known differences:
+  collection-valued keys (JSON flattens what `zuyaml_map` preserves) and tags,
+  which are **specified in design §6.6 but not implemented** — `!!str 12`
+  should be the string `"12"`.
 
 ---
 
