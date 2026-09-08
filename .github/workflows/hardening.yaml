@@ -62,9 +62,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install test dependencies
-        run: Rscript -e 'install.packages(c("testthat","withr"))'
-
+      # Deliberately no testthat: the r-hub binary repository does not host it,
+      # and building it and its twenty-odd dependencies from source under a
+      # sanitizer is slow and fragile. tools/sanitizer-exercise.R needs nothing
+      # but base R, and the sanitizer cares about the C layer, not about
+      # testthat's assertions.
       - name: Install the package
         run: R CMD INSTALL .
 
@@ -78,7 +80,7 @@ jobs:
         # exit status without tripping `-e`.
         run: |
           status=0
-          Rscript tools/ci-run-tests.R > sanitizer.log 2>&1 || status=$?
+          Rscript tools/sanitizer-exercise.R tests/testthat/fixtures/yaml-test-suite > sanitizer.log 2>&1 || status=$?
           cat sanitizer.log
           if grep -qiE "runtime error|AddressSanitizer|LeakSanitizer|SUMMARY: .*Sanitizer" sanitizer.log; then
             echo "::error::sanitizer reported a problem"
