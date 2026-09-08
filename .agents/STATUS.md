@@ -1,6 +1,6 @@
 # zuyaml — status
 
-Written 2026-09-08, at version 0.9.0, 18 commits on `develop`.
+Written 2026-09-08, at version 0.1.0, 25 commits on `develop`.
 
 Companion to [DESIGN-zuyaml.md](DESIGN-zuyaml.md) (what to build) and
 [ROADMAP.md](ROADMAP.md) (in what order). This says **where it actually is**,
@@ -16,7 +16,7 @@ attaches to M6 have never been demonstrated.
 
 | | |
 |---|---|
-| Version | 0.9.0 (release candidate; API complete, **not frozen**) |
+| Version | 0.1.0 — API complete, deliberately **not frozen** |
 | Exports | 9 — eight API functions plus `zuyaml_bigint()` |
 | Code | 527 lines R, 1,614 lines C, plus 14,478 lines vendored cyaml |
 | Tests | 2,517 assertions across 12 files, plus 84 conformance fixtures |
@@ -116,7 +116,7 @@ trip, and the three options that do nothing.
 
 ### Housekeeping
 
-- No `0.9.0` git tag.
+- No git tag.
 - win-builder results unread.
 - Upstream bug reports unfiled.
 - Not submitted to CRAN — deliberately.

@@ -1,7 +1,8 @@
-# zuyaml 0.9.0
+# zuyaml 0.1.0
 
-First release candidate. The API is complete but not yet frozen; it may still
-change before 1.0.0.
+First release. The API is complete and the package is well tested, but it is
+**not frozen**: names, defaults and return types may still change. Pin the
+version if you depend on it.
 
 ## Features
 

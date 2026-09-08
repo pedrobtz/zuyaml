@@ -4,8 +4,9 @@
 [![R-CMD-check](https://github.com/pedrobtz/zuyaml/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pedrobtz/zuyaml/actions/workflows/R-CMD-check.yaml)
 <!-- badges: end -->
 
-> **Status: in development.** Parsing and emitting work; the API is not frozen
-> and the package is not on CRAN. See
+> **Status: 0.1.0.** Parsing and emitting work and are well tested, but the API
+> is deliberately **not frozen** — names, defaults and return types may still
+> change, so pin the version if you depend on it. Not yet on CRAN. See
 > [`.agents/DESIGN-zuyaml.md`](.agents/DESIGN-zuyaml.md) and
 > [`.agents/ROADMAP.md`](.agents/ROADMAP.md).
 

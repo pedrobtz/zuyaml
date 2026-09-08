@@ -1,6 +1,6 @@
 ## Submission
 
-New submission of zuyaml 0.9.0.
+New submission of zuyaml 0.1.0.
 
 zuyaml converts between YAML 1.2 and ordinary R objects. It bundles the cyaml
 C11 parser/emitter, so it has no system dependency and no R dependencies beyond

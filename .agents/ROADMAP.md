@@ -67,7 +67,7 @@ Remaining: **M7**.
 | M4 ✅ | Emitter | 0.3.0 | L | Round trips hold, including numeric strings |
 | M5 ✅ | Files and integration | 0.4.0 | S | Usable as a dependency |
 | M6 ◐ | Conformance and hardening | 0.5.0 | L | Demonstrably robust |
-| M7 | Freeze and release | 0.9.0 → 1.0.0 | M | CRAN-accepted, API committed |
+| M7 | Freeze and release | → 1.0.0 | M | CRAN-accepted, API committed |
 
 M2 blocks everything after it. M3 and M4 are genuinely parallelisable if you want
 to work on two fronts; M5 is trivial once M4 lands.
@@ -281,15 +281,21 @@ files and raw bodies without reaching into internals.
 
 ## M7 — Freeze and release
 
-**0.9.0 → 1.0.0.**
+**0.1.0 → 1.0.0.**
 
 1. **Resolve every open question** in design §22 and record the decision.
    `simplify` (kept `FALSE`) and `max_nodes` (lowered to `1e6`) are settled.
    Still open: key stringification, the eight-versus-five function count, and
    whether `zuyaml_bigint` and `zuyaml_map` belong in 1.0 — all breaking
    changes afterwards.
-2. Tag `0.9.0` as a release candidate. Use it in a real project (`zuhttp` is the
-   obvious candidate) before freezing.
+
+   **The freeze is deliberately deferred.** The package ships as 0.1.0 with the
+   API explicitly unfrozen. The per-milestone version numbers elsewhere in this
+   document were planning fiction: the first release is 0.1.0, and 1.0.0 comes
+   only after the questions above are answered and the package has been used on
+   something real.
+2. Use 0.1.0 in a real project (`zuhttp` is the obvious candidate) before
+   freezing anything.
 3. Full documentation pass: every exported function, the conversion vignette, a
    README that describes the package rather than the `usethis` template.
 4. `R CMD check --as-cran` clean on all platforms; win-builder and R-hub.
