@@ -30,4 +30,4 @@ Other contributors:
 }
 
 }
-\keyword{internal}
+\keyword{package}

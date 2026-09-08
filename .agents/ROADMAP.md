@@ -30,19 +30,29 @@ Anything that cannot be committed to at that level is deferred past 1.0 — see
 
 ## Current state
 
-A bare `usethis` skeleton on `main`, nothing committed yet:
+**M0–M6 complete.** Parsing, emission, files, conformance, fuzzing and
+benchmarks are done and on `develop`. `R CMD check --as-cran` is clean at one
+NOTE (new submission); 2517 tests pass; R-CMD-check is green on macOS, Windows
+and Ubuntu (release, devel, oldrel-1, clang).
 
-| Present | State |
+What the milestones actually turned up, none of it predictable from the header:
+
+| Found | Consequence |
 |---|---|
-| `DESCRIPTION` | **Template placeholders** — "What the Package Does", `First Last` |
-| `NAMESPACE` | Empty roxygen stub |
-| `R/zuyaml-package.R` | `useDynLib` stub only |
-| `src/zuyaml-package.c` | Includes only, no entry points |
-| `.github/workflows/R-CMD-check.yaml` | Present, untested against compiled code |
-| `LICENSE` / `LICENSE.md` | MIT, needs the vendored-code notice |
-| `.Rbuildignore` | Missing `^\.agents$` |
+| Three of five `cyaml_opts_t` fields are never read (`dup_keys`, `max_depth`, `max_size`) | zuyaml enforces all three itself (design §3.1, §11) |
+| `cyaml_scalar_str()` truncates at an embedded NUL, silently | Raw span scanned before decoding |
+| `cyaml_new_float()` formats with `%g` — six significant digits | zuyaml formats doubles itself |
+| The emitter quotes plain `true`/`false`/`null`/`~`, so booleans emit as strings | Second vendored patch (`0002`) |
+| The emitter never quotes numeric-looking strings | `resolves_as_non_string()` in the emit path |
 
-No cyaml source is vendored yet. Everything below is greenfield.
+Conformance: **333/333** agreement with the yaml-test-suite on valid-versus-
+invalid, no crashes, no bare R errors escaping from C.
+
+Benchmarks: parsing runs at **0.6–0.9×** the `yaml` package, emission at
+**1.5–4×**, installed size 399 KB against 645 KB. R allocation dominates, not
+parsing. No performance claim belongs in user-facing text.
+
+Remaining: **M7**.
 
 ---
 
@@ -50,13 +60,13 @@ No cyaml source is vendored yet. Everything below is greenfield.
 
 | # | Milestone | Version | Effort | Gate |
 |---|---|---|---|---|
-| M0 | Metadata and hygiene | — | S | Skeleton is a real package, not a template |
-| M1 | Vendored build | 0.0.1 | M | Compiles clean on 3 platforms |
-| M2 | Parser core | 0.1.0 | L | Representative YAML 1.2 → R, safely |
-| M3 | Hard cases | 0.2.0 | L | No silent semantic loss |
-| M4 | Emitter | 0.3.0 | L | Round trips hold, including numeric strings |
-| M5 | Files and integration | 0.4.0 | S | Usable as a dependency |
-| M6 | Conformance and hardening | 0.5.0 | L | Demonstrably robust |
+| M0 ✅ | Metadata and hygiene | — | S | Skeleton is a real package, not a template |
+| M1 ✅ | Vendored build | 0.0.1 | M | Compiles clean on 3 platforms |
+| M2 ✅ | Parser core | 0.1.0 | L | Representative YAML 1.2 → R, safely |
+| M3 ✅ | Hard cases | 0.2.0 | L | No silent semantic loss |
+| M4 ✅ | Emitter | 0.3.0 | L | Round trips hold, including numeric strings |
+| M5 ✅ | Files and integration | 0.4.0 | S | Usable as a dependency |
+| M6 ✅ | Conformance and hardening | 0.5.0 | L | Demonstrably robust |
 | M7 | Freeze and release | 0.9.0 → 1.0.0 | M | CRAN-accepted, API committed |
 
 M2 blocks everything after it. M3 and M4 are genuinely parallelisable if you want
@@ -257,9 +267,11 @@ files and raw bodies without reaching into internals.
 
 **0.9.0 → 1.0.0.**
 
-1. **Resolve every open question** in design §22 and record the decision. In
-   particular `simplify`'s default and the fate of `zuyaml_bigint` — both are
-   breaking changes after 1.0.
+1. **Resolve every open question** in design §22 and record the decision.
+   `simplify` (kept `FALSE`) and `max_nodes` (lowered to `1e6`) are settled.
+   Still open: key stringification, the eight-versus-five function count, and
+   whether `zuyaml_bigint` and `zuyaml_map` belong in 1.0 — all breaking
+   changes afterwards.
 2. Tag `0.9.0` as a release candidate. Use it in a real project (`zuhttp` is the
    obvious candidate) before freezing.
 3. Full documentation pass: every exported function, the conversion vignette, a

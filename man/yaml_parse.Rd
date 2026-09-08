@@ -13,7 +13,7 @@ yaml_parse(
   duplicate_keys = FALSE,
   max_depth = 128L,
   max_size = 64 * 1024^2,
-  max_nodes = 1e+07,
+  max_nodes = 1e+06,
   path = NULL
 )
 
@@ -25,7 +25,7 @@ yaml_parse_all(
   duplicate_keys = FALSE,
   max_depth = 128L,
   max_size = 64 * 1024^2,
-  max_nodes = 1e+07,
+  max_nodes = 1e+06,
   path = NULL
 )
 }
@@ -58,7 +58,8 @@ resulting list.}
 \item{max_nodes}{Maximum number of R values materialised, or \code{0} for
 unlimited. This is the limit that bounds alias expansion: a
 billion-laughs document is small and shallow, so neither \code{max_size} nor
-\code{max_depth} constrains it.}
+\code{max_depth} constrains it. The default leaves roughly fifty times the
+headroom a very large document needs.}
 
 \item{path}{Optional file path, used only to make error messages more
 informative. Set by the file-reading functions in a later milestone.}

@@ -28,7 +28,8 @@
 #' @param max_nodes Maximum number of R values materialised, or `0` for
 #'   unlimited. This is the limit that bounds alias expansion: a
 #'   billion-laughs document is small and shallow, so neither `max_size` nor
-#'   `max_depth` constrains it.
+#'   `max_depth` constrains it. The default leaves roughly fifty times the
+#'   headroom a very large document needs.
 #' @param big_integers How to represent integers too large for an R numeric
 #'   type to hold exactly (beyond 2^53). `"bigint"` (the default) returns a
 #'   [zuyaml_bigint] character vector holding the decimal value, `"double"` is
@@ -60,7 +61,7 @@ yaml_parse <- function(x,
                        duplicate_keys = FALSE,
                        max_depth = 128L,
                        max_size = 64 * 1024^2,
-                       max_nodes = 1e7,
+                       max_nodes = 1e6,
                        path = NULL) {
   docs <- yaml_parse_all(
     x,
@@ -101,7 +102,7 @@ yaml_parse_all <- function(x,
                            duplicate_keys = FALSE,
                            max_depth = 128L,
                            max_size = 64 * 1024^2,
-                           max_nodes = 1e7,
+                           max_nodes = 1e6,
                            path = NULL) {
   check_input(x, path)
   check_flag(simplify, "simplify", path)

@@ -248,7 +248,7 @@ yaml_parse(
   duplicate_keys = FALSE,
   max_depth     = 128L,
   max_size      = 64 * 1024^2,
-  max_nodes     = 1e7
+  max_nodes     = 1e6
 )
 
 yaml_parse_all(x, ...)          # same arguments; returns a list of documents
@@ -1018,7 +1018,7 @@ user-visible:
 |---|---|---|
 | `max_depth` | `128L` | **`zuyaml`**, during conversion |
 | `max_size` | `64 * 1024^2` | **`zuyaml`**, before parsing |
-| `max_nodes` | `1e7` | **`zuyaml`**, conversion budget |
+| `max_nodes` | `1e6` | **`zuyaml`**, conversion budget |
 
 **All three limits are ours.** cyaml declares `max_depth` and `max_size` and
 reads neither (§3.1), so setting the upstream fields protects nothing. Passing
@@ -1427,12 +1427,12 @@ exists.
 
 ## 22. Open questions
 
-Decided above, but genuinely reversible — revisit before the API freezes:
+Two of these have now been settled; the rest remain open until the API freezes.
 
-1. **`simplify = FALSE` as the default** (§6.3). The argument for `FALSE` is
-   consistency with the rest of the design; the argument for `TRUE` is that it
-   matches the `yaml` package and most users' expectations. This is the single
-   most defensible thing to flip, and flipping it after 1.0 is a breaking change.
+1. **`simplify = FALSE` as the default** (§6.3). **Settled: keep `FALSE`.**
+   Consistency with the rest of the design won over matching the `yaml`
+   package. The shape of the result never depends on the contents of the
+   document, and `simplify = TRUE` remains one argument away.
 2. **Stringifying non-string scalar keys** (§6.4). The strict alternative — any
    non-string key produces a `zuyaml_map` — is more faithful but makes `{1: a}`
    return an exotic class. Current choice favours ergonomics.
@@ -1442,15 +1442,11 @@ Decided above, but genuinely reversible — revisit before the API freezes:
 4. **`zuyaml_bigint` as public API** (§6.2). Once users receive it, its
    representation is a compatibility surface. An alternative is defaulting
    `big_integers = "error"` and shipping no class at all in v0.1.
-5. **`max_nodes = 1e7`** (§11.1). Measured on both sides now; decide at M7.
-   Against it: a 293-byte billion-laughs payload expands to 4.7M nodes in ~0.9s
-   before completing successfully, so the default lets a sub-300-byte input
-   cost about a second of CPU and a few hundred MB. For it: legitimate
-   documents are far smaller than the limit — a 20,000-element sequence is
-   20,000 nodes, so even a very large manifest sits three orders of magnitude
-   below `1e7`. That gap is the argument for lowering the default to `1e6`:
-   it still leaves ~50× headroom over any realistic document while cutting the
-   worst case tenfold.
+5. **`max_nodes`** (§11.1). **Settled: `1e6`.** Measurement decided it. A
+   20,000-element sequence is 20,000 nodes, so even a very large manifest sits
+   ~50× below the limit, while the worst case for a sub-300-byte hostile input
+   drops roughly tenfold — from ~0.9s and a few hundred MB to about a tenth of
+   that. The old `1e7` bought headroom no real document needed.
 6. **Whether `zuyaml_map` should exist in v0.1 at all** (§6.4). It cannot be
    emitted, so it is a parse-only asymmetry; erroring on collection keys would be
    simpler, at the cost of failing on documents `cyaml` handles fine.
