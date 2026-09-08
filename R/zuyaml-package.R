@@ -1,4 +1,4 @@
-#' @keywords internal
+#' @keywords package
 "_PACKAGE"
 
 ## usethis namespace: start

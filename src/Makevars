@@ -1,0 +1,12 @@
+# The vendored cyaml sources live flat in src/, so R CMD SHLIB compiles them
+# as ordinary package sources with no OBJECTS list. See tools/vendor-cyaml.sh.
+#
+# CYAML_VERSION_STR must be defined here: cyaml_internal.h falls back to
+# "0.0.0-dev" when the build does not supply it. Upstream's CMake defines it;
+# we do not use CMake. Without this flag cyaml_version() misreports the
+# vendored version and tests/testthat/test-vendor.R fails.
+#
+# Never define CYAML_DEBUG or CYAML_TRACE. They enable printf() and
+# fprintf(stderr) paths in the vendored sources, which CRAN prohibits.
+
+PKG_CPPFLAGS = -DCYAML_VERSION_STR=\"0.1.3\"

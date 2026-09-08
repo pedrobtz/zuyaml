@@ -1,0 +1,81 @@
+# Integers beyond what R can hold exactly, and the big_integers policy.
+
+test_that("the 2^53 boundary is respected exactly", {
+  # 2^53 is the largest integer a double holds exactly.
+  expect_type(yaml_parse("9007199254740992"), "double")
+  expect_s3_class(yaml_parse("9007199254740993"), "zuyaml_bigint")
+})
+
+test_that("large integers become zuyaml_bigint by default", {
+  for (v in c(
+    "9223372036854775807", # INT64_MAX
+    "-9223372036854775808", # INT64_MIN
+    "18446744073709551615", # UINT64_MAX
+    "99999999999999999999999999" # beyond uint64
+  )) {
+    x <- yaml_parse(v)
+    expect_s3_class(x, "zuyaml_bigint")
+    expect_identical(as.character(x), v)
+  }
+})
+
+test_that("zuyaml_bigint carries the decimal value, not the source text", {
+  # cyaml accepts 0x and 0o integers. Storing the source would give
+  # "0x7FFFFFFFFFFFFFFF", useless for comparison and not an integer on emit.
+  expect_identical(
+    as.character(yaml_parse("0x7FFFFFFFFFFFFFFF")),
+    "9223372036854775807"
+  )
+})
+
+test_that("big_integers policies behave as documented", {
+  big <- "9223372036854775807"
+
+  expect_s3_class(yaml_parse(big, big_integers = "bigint"), "zuyaml_bigint")
+
+  # "double" is an explicit opt-in to losing precision.
+  d <- yaml_parse(big, big_integers = "double")
+  expect_type(d, "double")
+
+  err <- tryCatch(
+    yaml_parse(big, big_integers = "error"),
+    zuyaml_error = identity
+  )
+  expect_identical(err$code, "precision")
+
+  # Values that fit are unaffected by the policy.
+  expect_identical(yaml_parse("42", big_integers = "error"), 42L)
+})
+
+test_that("precision is never lost silently", {
+  # The invariant: no default path turns a >2^53 integer into a rounded double.
+  x <- yaml_parse("9223372036854775807")
+  expect_false(is.numeric(x))
+  expect_identical(as.character(x), "9223372036854775807")
+})
+
+test_that("the constructor validates", {
+  expect_s3_class(zuyaml_bigint("123"), "zuyaml_bigint")
+  expect_s3_class(zuyaml_bigint(zuyaml_bigint("123")), "zuyaml_bigint")
+  expect_identical(as.character(zuyaml_bigint("-7")), "-7")
+
+  expect_error(zuyaml_bigint("12x"), "decimal integers")
+  expect_error(zuyaml_bigint("1.5"), "decimal integers")
+  expect_error(zuyaml_bigint(TRUE), "character vector")
+})
+
+test_that("zuyaml_bigint has usable methods", {
+  x <- yaml_parse("9223372036854775807")
+
+  expect_identical(format(x), "9223372036854775807")
+  expect_identical(as.character(x), "9223372036854775807")
+  expect_type(as.numeric(x), "double") # lossy, deliberately
+  expect_output(print(x), "zuyaml_bigint")
+  expect_s3_class(x[1], "zuyaml_bigint")
+})
+
+test_that("sequences of big integers are never simplified", {
+  x <- yaml_parse("[9223372036854775807, 9223372036854775806]", simplify = TRUE)
+  expect_type(x, "list")
+  expect_s3_class(x[[1]], "zuyaml_bigint")
+})

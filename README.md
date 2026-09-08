@@ -4,8 +4,9 @@
 [![R-CMD-check](https://github.com/pedrobtz/zuyaml/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pedrobtz/zuyaml/actions/workflows/R-CMD-check.yaml)
 <!-- badges: end -->
 
-> **Status: pre-alpha.** The design is settled; the implementation has not
-> started. Nothing below works yet. See
+> **Status: 0.1.0.** Parsing and emitting work and are well tested, but the API
+> is deliberately **not frozen** — names, defaults and return types may still
+> change, so pin the version if you depend on it. Not yet on CRAN. See
 > [`.agents/DESIGN-zuyaml.md`](.agents/DESIGN-zuyaml.md) and
 > [`.agents/ROADMAP.md`](.agents/ROADMAP.md).
 
@@ -35,7 +36,7 @@ are deliberate:
 If you want compatibility with the existing `yaml` package's behaviour, use that
 package. `zuyaml` optimises for predictability instead.
 
-## Planned API
+## API
 
 Eight functions, on one rule: **`_all` means "YAML stream"**.
 
@@ -46,9 +47,29 @@ Eight functions, on one rule: **`_all` means "YAML stream"**.
 | read file | `yaml_read()` | `yaml_read_all()` |
 | write file | `yaml_write()` | `yaml_write_all()` |
 
-## Installation
+``` r
+library(zuyaml)
 
-Not yet installable. When it is:
+yaml_parse("host: localhost\nport: 8080\ntls: true\n")
+#> $host
+#> [1] "localhost"
+#>
+#> $port
+#> [1] 8080
+#>
+#> $tls
+#> [1] TRUE
+
+cat(yaml_emit(list(version = "42", ratio = 0.5)))
+#> version: "42"
+#> ratio: 0.5
+```
+
+Note the quoting: `"42"` is a string in R, so it stays a string in YAML and on
+the way back. See `vignette("zuyaml")` for the full conversion rules, including
+the cases that do not round-trip.
+
+## Installation
 
 ``` r
 # install.packages("pak")

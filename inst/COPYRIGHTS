@@ -35,6 +35,17 @@ Bundled third-party code: cyaml
       condition, because CRAN policy prohibits compiled code that aborts
       the process or writes to stderr.
 
+    - src/cyaml_emitter.c: emit_scalar() no longer promotes a plain scalar
+      spelled null/true/false/~ to double-quoted. Upstream, that promotion
+      makes a boolean built with cyaml_new_bool() emit as the string
+      "true". zuyaml selects scalar styles before building, so the
+      decision has already been made by the caller.
+
+    - src/cyaml.c: cyaml_doc_append() no longer calls memcpy() when there
+      is nothing to copy. Appending zero bytes to a document whose buffer
+      has not been allocated yet passes a NULL destination to memcpy(),
+      which is undefined behaviour; UndefinedBehaviorSanitizer reports it.
+
   No other upstream source file is modified. Upstream files are otherwise
   bundled verbatim.
 
