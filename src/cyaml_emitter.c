@@ -590,7 +590,18 @@ static bool emit_scalar(emitter_t* e, const cyaml_node_t* n, int depth)
 
     switch (style) {
     case CYAML_PLAIN:
-        if (needs_quoting_ex(s, len, n->tag.len)) {
+        /* zuyaml patch: upstream promotes any plain scalar spelled null,
+           true, false or ~ to double-quoted. Scalars carry no type of their
+           own, so this is the safe default for a string -- but it means a
+           boolean built with cyaml_new_bool() emits as the string "true",
+           and cyaml's own parse-then-emit turns `a: true` into `a: "true"`.
+           zuyaml decides scalar styles before building (it double-quotes any
+           string that would resolve as a non-string under the core schema),
+           so the promotion is suppressed here. A non-zero tag_len is the
+           documented way to skip it; every other quoting rule still applies.
+           Safe only because zuyaml always builds nodes from R values and
+           never re-emits a parsed document. */
+        if (needs_quoting_ex(s, len, 1)) {
             style = CYAML_DOUBLE;
         }
         break;

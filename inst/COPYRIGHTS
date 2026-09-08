@@ -35,6 +35,12 @@ Bundled third-party code: cyaml
       condition, because CRAN policy prohibits compiled code that aborts
       the process or writes to stderr.
 
+    - src/cyaml_emitter.c: emit_scalar() no longer promotes a plain scalar
+      spelled null/true/false/~ to double-quoted. Upstream, that promotion
+      makes a boolean built with cyaml_new_bool() emit as the string
+      "true". zuyaml selects scalar styles before building, so the
+      decision has already been made by the caller.
+
   No other upstream source file is modified. Upstream files are otherwise
   bundled verbatim.
 

@@ -83,6 +83,9 @@ typedef struct zuyaml_anc {
     const struct zuyaml_anc* parent;
 } zuyaml_anc_t;
 
+SEXP zuyaml_emit_(SEXP x, SEXP indent, SEXP width, SEXP document_start,
+    SEXP document_end);
+
 /* Conversion of a cyaml node to an R object. */
 SEXP zuyaml_convert_node(const cyaml_doc_t* doc, const cyaml_node_t* node,
     zuyaml_ctx_t* ctx, const zuyaml_anc_t* anc);

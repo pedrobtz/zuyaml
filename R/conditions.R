@@ -97,3 +97,16 @@ check_count <- function(value, arg, path) {
   }
   as.double(value)
 }
+
+# indent and width are uint8_t in the emitter options upstream, so an
+# out-of-range value would silently wrap (width = 1000 becomes 232).
+check_uint8 <- function(value, arg, min = 0L) {
+  if (!is.numeric(value) || length(value) != 1L || is.na(value) ||
+    value < min || value > 255) {
+    zuyaml_abort(
+      sprintf("`%s` must be a single number between %d and 255.", arg, min),
+      code = "invalid_input"
+    )
+  }
+  as.integer(value)
+}
