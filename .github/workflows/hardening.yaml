@@ -71,13 +71,14 @@ jobs:
       - name: Run the test suite under the sanitizer
         # Errors raised mid-conversion unwind past the explicit free, so the
         # error paths are exactly what needs watching here.
-        # These containers run `sh -e`, not bash, so `set -o pipefail` is an
-        # illegal option and would kill the step before any test runs. Capture
-        # to a file and check the status explicitly instead of relying on a
-        # pipeline's exit status.
+        # These containers run `sh -e`, not bash. Two consequences, both of
+        # which silently hid the sanitizer output before: `set -o pipefail` is
+        # an illegal option, and under `-e` a failing Rscript aborts the step
+        # immediately, so the log was never printed. `|| status=$?` keeps the
+        # exit status without tripping `-e`.
         run: |
-          Rscript tools/ci-run-tests.R > sanitizer.log 2>&1
-          status=$?
+          status=0
+          Rscript tools/ci-run-tests.R > sanitizer.log 2>&1 || status=$?
           cat sanitizer.log
           if grep -qiE "runtime error|AddressSanitizer|LeakSanitizer|SUMMARY: .*Sanitizer" sanitizer.log; then
             echo "::error::sanitizer reported a problem"
