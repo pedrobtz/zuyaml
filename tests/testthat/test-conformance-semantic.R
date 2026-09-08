@@ -5,7 +5,7 @@
 # object against `in.json` -- the suite's own rendering of the same document --
 # which is an external reference rather than the package's own expectations.
 #
-# It is worth the trouble. Writing this comparison found three real conversion
+# It is worth the trouble. Writing this comparison found five real conversion
 # bugs that the accept/reject tests could not have caught:
 #
 #   * multi-line plain scalars were not line-folded, because the zero-copy path
@@ -62,6 +62,15 @@ expected_mismatch <- c(
   "WZ62"
 )
 
+# Fixture directories are named either by the bare suite id ("WZ62") or with a
+# descriptive prefix ("tags-unknown-tag-P76L"), depending on how the fixture
+# was curated. Matching on the trailing id makes the allow-list work on the
+# bundled fixtures as well as on an upstream checkout.
+is_expected_mismatch <- function(id) {
+  id %in% expected_mismatch ||
+    any(endsWith(id, paste0("-", expected_mismatch)))
+}
+
 semantic_cases <- function() {
   root <- suite_root_semantic()
   if (!dir.exists(root)) {
@@ -87,12 +96,20 @@ test_that("parsed values match the suite's own JSON rendering", {
     id <- basename(d)
     yaml_file <- file.path(d, "in.yaml")
 
+    # A case that reaches here has no `error` file, so the suite says it is
+    # valid and it must parse. Failing to is a regression in its own right --
+    # swallowing it here is how a newly added throwing path would go
+    # unnoticed -- so it is reported rather than skipped.
     docs <- tryCatch(
       yaml_parse_all(readBin(yaml_file, "raw", file.info(yaml_file)$size),
                      max_nodes = 1e6),
-      error = function(e) NULL
+      error = function(e) e
     )
-    if (is.null(docs)) next
+    if (inherits(docs, "condition")) {
+      wrong <- c(wrong, sprintf("%s: parse failed: %s", id,
+                                conditionMessage(docs)))
+      next
+    }
 
     # A stream's in.json holds one JSON value per document, concatenated and
     # pretty-printed. Splitting that reliably needs an incremental parser, so
@@ -111,7 +128,7 @@ test_that("parsed values match the suite's own JSON rendering", {
     compared <- compared + 1L
     agrees <- identical(normalise(docs[[1]]), normalise(reference))
 
-    if (id %in% expected_mismatch) {
+    if (is_expected_mismatch(id)) {
       # Listed as a known difference. If it starts agreeing, the note above is
       # stale and should be removed.
       if (agrees) {
@@ -219,4 +236,76 @@ test_that("an explicit int tag on non-integer text does not become a bigint", {
   # reached by text that is not an integer at all.
   expect_identical(yaml_parse("!!int 1 - 3"), "1 - 3")
   expect_false(inherits(yaml_parse("!!int nonsense"), "zuyaml_bigint"))
+})
+
+test_that("a %TAG directive that restates a default changes nothing", {
+  # `%TAG !! tag:yaml.org,2002:` is legal and is exactly the default binding,
+  # so the core tags must keep working. Comparing only the handle would have
+  # turned every core tag in the document into an application tag.
+  expect_identical(
+    yaml_parse("%TAG !! tag:yaml.org,2002:\n---\n!!str 12\n"),
+    "12"
+  )
+  expect_identical(
+    yaml_parse("%TAG !! tag:yaml.org,2002:\n---\n!!str 12\n", tags = "error"),
+    "12"
+  )
+})
+
+test_that("the non-specific tag is not subject to %TAG substitution", {
+  # `!` as a whole tag is a separate production from the primary tag handle:
+  # a `%TAG !` directive rebinds the handle, not the non-specific tag.
+  doc <- "%TAG ! tag:example.com,2000:app/\n---\n! 12\n"
+  expect_identical(yaml_parse(doc), "12")
+  expect_identical(yaml_parse(doc, tags = "error"), "12")
+
+  # A shorthand using that handle *is* rebound, and so is an application tag.
+  expect_identical(
+    yaml_parse("%TAG ! tag:example.com,2000:app/\n---\n!x 12\n"),
+    12L
+  )
+})
+
+test_that("core tags are recognised in every spelling", {
+  # cyaml hands back the raw source span of the tag token, so the verbatim and
+  # named-handle forms have to be expanded before they are compared.
+  expect_identical(yaml_parse("!<tag:yaml.org,2002:str> 12"), "12")
+  expect_identical(
+    yaml_parse("%TAG !e! tag:yaml.org,2002:\n---\n!e!str 12\n"),
+    "12"
+  )
+  # A verbatim application tag is still an application tag.
+  expect_identical(yaml_parse("!<tag:example.com,2000:x> 12"), 12L)
+})
+
+test_that("a core tag on non-conforming text falls back to a string", {
+  # An unresolvable scalar is a string in YAML. All three core scalar tags
+  # take the same way out, so a document that parsed before tags were honoured
+  # keeps parsing.
+  expect_identical(yaml_parse("!!int nonsense"), "nonsense")
+  expect_identical(yaml_parse("!!float abc"), "abc")
+  expect_identical(yaml_parse("!!bool notabool"), "notabool")
+})
+
+test_that("the tags policy applies to mapping keys", {
+  # A key is stringified rather than converted, so it never passes through the
+  # scalar path where the policy is otherwise applied.
+  expect_identical(yaml_parse("!duration 5m: v"), list(`5m` = "v"))
+
+  err <- tryCatch(
+    yaml_parse("!duration 5m: v", tags = "error"),
+    zuyaml_error = identity
+  )
+  expect_identical(err$code, "unsupported_tag")
+  expect_match(conditionMessage(err), "!duration")
+})
+
+test_that("an unsupported tag is reported at the tag's own position", {
+  # The message names the tag, so the location must be the tag's, not that of
+  # the value it decorates.
+  err <- tryCatch(
+    yaml_parse("value: !duration 5m", tags = "error"),
+    zuyaml_error = identity
+  )
+  expect_match(conditionMessage(err), "line 1, column 8")
 })

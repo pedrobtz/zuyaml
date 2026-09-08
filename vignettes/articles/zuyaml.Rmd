@@ -169,6 +169,44 @@ str(yaml_parse("defaults: &d\n  timeout: 30\nserver: *d\n"))
 
 Cycles are refused, and `aliases = "error"` rejects aliases outright.
 
+## Tags
+
+A tag overrides schema resolution: `!!str 12` is the string, not the integer.
+Core schema tags are honoured in every spelling — the shorthand `!!str`, the
+verbatim `!<tag:yaml.org,2002:str>`, and a handle bound by a `%TAG` directive —
+and the non-specific tag `!` forces string resolution too.
+
+```{r}
+yaml_parse("!!str 12")
+yaml_parse("! 12")
+yaml_parse('!!int "12"')
+```
+
+A core tag on text that does not conform to it resolves as a string, which is
+what an unresolvable scalar is in YAML.
+
+```{r}
+yaml_parse("!!float abc")
+```
+
+Application tags such as `!duration` are ignored by default: the value is
+converted as though it carried no tag. Refusing them would reject a great deal
+of ordinary YAML — the specification's own examples carry application tags —
+so `tags = "error"` is opt-in, for callers who would rather hear about the
+semantics they are dropping.
+
+```{r}
+yaml_parse("v: !duration 5m")
+try(yaml_parse("v: !duration 5m", tags = "error"))
+```
+
+A `%TAG` directive that rebinds a handle is honoured, so the shorthand no
+longer names a core tag.
+
+```{r}
+yaml_parse("%TAG !! tag:example.com,2000:app/\n---\n!!int 1 - 3\n")
+```
+
 ## Emitting
 
 ```{r}
@@ -243,6 +281,7 @@ Every entry below is a deliberate trade-off, not an oversight.
 | Comments | Discarded | No |
 | Quoting and block style | Re-chosen on emit | Semantically |
 | Anchors and aliases | Resolved to values | Semantically |
+| Tags | Applied on parse, then discarded | **No** |
 | Non-string scalar keys | Stringified (`1` → `"1"`) | Semantically |
 | Collection-valued keys | `zuyaml_map` on parse | **No** — cannot be emitted |
 | Duplicate keys (opt-in) | Duplicate R names | **No** — cannot be emitted |

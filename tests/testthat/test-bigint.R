@@ -79,3 +79,33 @@ test_that("sequences of big integers are never simplified", {
   expect_type(x, "list")
   expect_s3_class(x[[1]], "zuyaml_bigint")
 })
+
+test_that("integers beyond uint64 are normalised and approximated", {
+  # Past uint64 only the source text is available, so the normalisation and
+  # the lossy double both have to be derived from it.
+  huge <- strrep("9", 40)
+
+  expect_identical(as.character(yaml_parse(huge)), huge)
+
+  # A leading '+' and leading zeros are not part of the value: +007 and 7 must
+  # give the same bigint, or comparison of parsed values is unreliable.
+  expect_identical(
+    unclass(yaml_parse(paste0("+", huge))),
+    unclass(yaml_parse(huge))
+  )
+  expect_identical(
+    unclass(yaml_parse(paste0(strrep("0", 10), huge))),
+    unclass(yaml_parse(huge))
+  )
+  expect_identical(as.character(yaml_parse(paste0("-", huge))),
+                   paste0("-", huge))
+
+  # big_integers = "double" is lossy by design, but it must still yield the
+  # value: anything of 32 digits or more used to come back as Inf.
+  expect_equal(yaml_parse(strrep("9", 31), big_integers = "double"), 1e31,
+               tolerance = 1e-12)
+  expect_equal(yaml_parse(strrep("9", 32), big_integers = "double"), 1e32,
+               tolerance = 1e-12)
+  expect_equal(yaml_parse(paste0("-", huge), big_integers = "double"), -1e40,
+               tolerance = 1e-12)
+})
