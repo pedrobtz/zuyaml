@@ -1,0 +1,112 @@
+# Checks that are too slow or too specialised for the per-push R-CMD-check run.
+#
+# The C boundary is where this package should be unusually strict: it vendors a
+# C library and hands it untrusted input. These jobs are what make the
+# robustness claims testable rather than asserted.
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+  schedule:
+    # Weekly, so that a latent problem surfaces without waiting for a push.
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+name: hardening.yaml
+
+permissions: read-all
+
+jobs:
+  full-test-suite:
+    runs-on: ubuntu-latest
+    name: full yaml-test-suite
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::testthat, any::devtools
+          needs: check
+
+      - name: Fetch the full suite
+        run: tools/fetch-yaml-test-suite.sh "${{ runner.temp }}/yaml-test-suite"
+
+      - name: Run conformance against every case
+        env:
+          ZUYAML_TEST_SUITE: ${{ runner.temp }}/yaml-test-suite
+        run: |
+          Rscript -e 'devtools::load_all("."); \
+            res <- testthat::test_local(".", reporter = "summary"); \
+            df <- as.data.frame(res); \
+            if (sum(df$failed) > 0 || any(df$error)) quit(status = 1)'
+
+  sanitizers:
+    runs-on: ubuntu-latest
+    name: ${{ matrix.sanitizer }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [clang-asan, gcc-san]
+
+    container:
+      image: ghcr.io/r-hub/containers/${{ matrix.sanitizer }}:latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install test dependencies
+        run: |
+          Rscript -e 'install.packages(c("testthat", "withr"), \
+            repos = "https://cloud.r-project.org")'
+
+      - name: Install the package
+        run: R CMD INSTALL .
+
+      - name: Run the test suite under the sanitizer
+        # Errors raised mid-conversion unwind past the explicit free, so the
+        # error paths are exactly what needs watching here.
+        run: |
+          Rscript -e 'testthat::test_local(".", reporter = "summary")' \
+            2>&1 | tee sanitizer.log
+          if grep -qiE "runtime error|AddressSanitizer|LeakSanitizer" sanitizer.log; then
+            echo "::error::sanitizer reported a problem"
+            exit 1
+          fi
+
+  fuzz:
+    runs-on: ubuntu-latest
+    name: wrapper fuzzing
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      ZUYAML_FUZZ: "20000"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::testthat, any::devtools, any::withr
+          needs: check
+
+      - name: Fuzz the parser
+        run: |
+          Rscript -e 'devtools::load_all("."); \
+            res <- testthat::test_local(".", filter = "fuzz", \
+              reporter = "summary"); \
+            df <- as.data.frame(res); \
+            if (sum(df$failed) > 0 || any(df$error)) quit(status = 1)'

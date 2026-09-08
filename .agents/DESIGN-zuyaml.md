@@ -1300,19 +1300,44 @@ should be unusually strict.
 ## 18. Benchmarks
 
 Performance is not the reason to build `zuyaml`, but measurements guide
-implementation. Compare against the R `yaml` package on small config files,
-Kubernetes-style documents, large scalar arrays, deeply nested structures, and
-multi-document streams — for parsing, emission, installed size, and compile time.
+implementation. `tools/benchmark.R` compares against the R `yaml` package.
 
-Measure the three stages separately:
+### First measurements (macOS, arm64, R 4.6.1)
 
-```text
-cyaml parse | R conversion | total yaml_parse()
-```
+| workload | parse vs `yaml` | emit vs `yaml` |
+|---|---|---|
+| small config | 0.64× | 1.66× |
+| Kubernetes-style | 0.86× | 1.45× |
+| 20k integers | 0.68× | 4.11× |
+| 20k strings | 0.64× | 1.83× |
+| deep nesting | 0.61× | 1.48× |
+| 500 documents | 1.13× | — |
 
-This shows whether the bottleneck is the YAML engine or R allocation, and is the
-direct test of §9.5's zero-copy plain-scalar path. Avoid performance claims
-unless measurements support them.
+Installed size: **399 KB** against `yaml`'s 645 KB.
+
+**`zuyaml` parses more slowly than `yaml` — roughly 0.6–0.9×** — and emits
+1.5–4× faster. Multi-document streams are the one parsing case where it wins,
+which makes sense: the stream API is the path the design optimises for.
+
+This is stated plainly because §2's value proposition is architectural, not
+performance-based. **No performance claim belongs in the README or
+`DESCRIPTION`**, and certainly not a speed claim for parsing.
+
+### Where the time goes
+
+Comparing documents of equal size but very different scalar counts separates
+the engine from R allocation:
+
+| workload | input | time |
+|---|---|---|
+| 20,000 tiny scalars | 145 KB | 7.95 ms |
+| 20 large scalars | 98 KB | 1.27 ms |
+
+Per byte, the many-small-scalars case costs about **4× more**. The bottleneck is
+allocating R objects, not parsing YAML — which is what §9.5's zero-copy plain
+scalar path exists to reduce, and confirms that further optimisation belongs on
+the R-allocation side rather than in the parser. Closing the gap with `yaml`
+would mean reducing per-scalar `SEXP` allocation, not faster parsing.
 
 ---
 
@@ -1417,14 +1442,15 @@ Decided above, but genuinely reversible — revisit before the API freezes:
 4. **`zuyaml_bigint` as public API** (§6.2). Once users receive it, its
    representation is a compatibility surface. An alternative is defaulting
    `big_integers = "error"` and shipping no class at all in v0.1.
-5. **`max_nodes = 1e7`** (§11.1). Now partly measured, still unsettled. With the
-   default budget, a 293-byte billion-laughs payload expands to 4.7M nodes in
-   ~0.9s before completing successfully; one level deeper (9^8 leaves) trips the
-   limit in ~1.1s. So the defence works, but the default still lets a
-   sub-300-byte input cost about a second of CPU and a few hundred MB. A limit
-   of `1e6` would cut that tenfold and still admit very large legitimate
-   documents. Decide from the §18 benchmarks, using a real large manifest to
-   set the floor.
+5. **`max_nodes = 1e7`** (§11.1). Measured on both sides now; decide at M7.
+   Against it: a 293-byte billion-laughs payload expands to 4.7M nodes in ~0.9s
+   before completing successfully, so the default lets a sub-300-byte input
+   cost about a second of CPU and a few hundred MB. For it: legitimate
+   documents are far smaller than the limit — a 20,000-element sequence is
+   20,000 nodes, so even a very large manifest sits three orders of magnitude
+   below `1e7`. That gap is the argument for lowering the default to `1e6`:
+   it still leaves ~50× headroom over any realistic document while cutting the
+   worst case tenfold.
 6. **Whether `zuyaml_map` should exist in v0.1 at all** (§6.4). It cannot be
    emitted, so it is a parse-only asymmetry; erroring on collection keys would be
    simpler, at the cost of failing on documents `cyaml` handles fine.
