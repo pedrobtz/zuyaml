@@ -1046,7 +1046,13 @@ bool cyaml_str_to_i64(const char* s, const char** end, int64_t* out)
     if (neg) {
         if (uval > (uint64_t)INT64_MAX + 1)
             return false;
-        *out = -(int64_t)uval;
+        /* zuyaml patch: INT64_MIN is representable but -INT64_MIN is not, so
+           the general -(int64_t)uval overflows for it -- signed overflow, which
+           is undefined behaviour. UBSan reports it. Reached by parsing the
+           ordinary literal -9223372036854775808. */
+        *out = (uval == (uint64_t)INT64_MAX + 1)
+            ? INT64_MIN
+            : -(int64_t)uval;
     } else {
         if (uval > (uint64_t)INT64_MAX)
             return false;

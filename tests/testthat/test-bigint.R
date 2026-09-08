@@ -109,3 +109,29 @@ test_that("integers beyond uint64 are normalised and approximated", {
   expect_equal(yaml_parse(paste0("-", huge), big_integers = "double"), -1e40,
                tolerance = 1e-12)
 })
+
+test_that("the 64-bit boundary values parse exactly", {
+  # -9223372036854775808 is INT64_MIN. Negating it in int64_t overflows, which
+  # is undefined behaviour rather than merely implementation-defined; UBSan
+  # reports it and CRAN runs UBSan builds. See tools/patches/README.md, patch
+  # 0004. The value was right on the compilers tried, so only a sanitizer
+  # distinguishes the fixed code from the broken code -- which is exactly why
+  # this needs pinning by value here *and* exercising under the sanitizer in
+  # tools/sanitizer-exercise.R.
+  boundaries <- c(
+    "9223372036854775807",   # INT64_MAX
+    "-9223372036854775808",  # INT64_MIN
+    "-9223372036854775807",  # INT64_MIN + 1
+    "9223372036854775808",   # INT64_MAX + 1, past int64 but inside uint64
+    "-9223372036854775809",  # INT64_MIN - 1, past int64 on the low side
+    "18446744073709551615"   # UINT64_MAX
+  )
+
+  for (v in boundaries) {
+    expect_identical(as.character(yaml_parse(v)), v, info = v)
+  }
+
+  # And the sign is not lost on the way to a double.
+  expect_equal(yaml_parse("-9223372036854775808", big_integers = "double"),
+               -9223372036854775808, tolerance = 1e-12)
+})

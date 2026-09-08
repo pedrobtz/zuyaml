@@ -74,6 +74,12 @@ cat("-- parsing, including every error path ---------------------------\n")
 sources <- c(
   "a: 1", "[1, 2, 3]", "- a\n- b", "null", "~", '""', "{}", "[]",
   "a: &x 1\nb: *x", "? [one, two]\n: value", "9223372036854775807",
+  # The 64-bit boundaries. -9223372036854775808 is INT64_MIN, whose negation
+  # overflows in the obvious implementation of cyaml_str_to_i64() -- undefined
+  # behaviour that stayed green here until this line existed (patch 0004). The
+  # values either side of each limit are cheap to carry along.
+  "-9223372036854775808", "-9223372036854775807", "-9223372036854775809",
+  "9223372036854775808", "18446744073709551615", "18446744073709551616",
   "0x1F", ".inf", ".nan", "2026-09-07", "|\n  block\n", ">\n  folded\n",
   "---\na: 1\n---\nb: 2\n", "%YAML 1.2\n---\na: 1\n",
   # error paths

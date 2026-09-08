@@ -40,4 +40,5 @@ version if you depend on it.
   contents of the document.
 
 * The `cyaml` C library is bundled and pinned to v0.1.3. See `inst/COPYRIGHTS`
-  for licensing and the two modifications made for R compatibility.
+  for licensing and the modifications made for R compatibility, and
+  `tools/patches/README.md` for why each one is required.
