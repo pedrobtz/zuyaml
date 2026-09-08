@@ -116,11 +116,16 @@ test_that("parsed values match the suite's own JSON rendering", {
     # only single-document cases are compared.
     if (length(docs) != 1L) next
 
+    # in.json is UTF-8 whatever the session's locale is. readLines() would
+    # leave its bytes unmarked, and in a C locale jsonlite then escapes them
+    # into literal "<e2><99><a5>" text -- so H3Z8 would look like a conversion
+    # disagreement when only the reading was wrong. The YAML side is already
+    # read as raw bytes; read this side the same way.
+    json_file <- file.path(d, "in.json")
+    json_text <- rawToChar(readBin(json_file, "raw", file.info(json_file)$size))
+    Encoding(json_text) <- "UTF-8"
     reference <- tryCatch(
-      jsonlite::fromJSON(
-        paste(readLines(file.path(d, "in.json"), warn = FALSE), collapse = "\n"),
-        simplifyVector = FALSE
-      ),
+      jsonlite::fromJSON(json_text, simplifyVector = FALSE),
       error = function(e) NULL
     )
     if (is.null(reference)) next
