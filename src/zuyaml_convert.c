@@ -9,6 +9,21 @@
 /* Largest integer exactly representable as an IEEE-754 double. */
 #define ZUYAML_MAX_EXACT_DOUBLE 9007199254740992.0
 
+static bool all_digits(const char* s, size_t n)
+{
+    size_t i;
+
+    if (n == 0) {
+        return false;
+    }
+    for (i = 0; i < n; i++) {
+        if (s[i] < '0' || s[i] > '9') {
+            return false;
+        }
+    }
+    return true;
+}
+
 _Noreturn static void stop_embedded_nul(void)
 {
     zuyaml_stopf("embedded_nul", NULL,
@@ -236,15 +251,26 @@ static SEXP scalar_int(const cyaml_doc_t* doc, const cyaml_node_t* node,
 
     /* Beyond uint64 entirely. Only the source text is available, so it is used
        as-is; such a literal is decimal in practice, since hex and octal forms
-       are handled above. */
+       are handled above.
+       
+       This is also reachable when an explicit !!int tag is attached to text
+       that is not an integer at all, so the text is validated rather than
+       trusted: otherwise `!!int 1 - 3` would become a zuyaml_bigint holding
+       "1 - 3". Anything that is not a decimal integer falls back to a
+       string, which is what an unresolvable scalar is. */
     {
         const char* raw = cyaml_str(doc, node);
         uint32_t raw_n = cyaml_len(node);
         SEXP txt, out;
+        uint32_t k = (raw_n > 0 && (raw[0] == '+' || raw[0] == '-')) ? 1 : 0;
 
-        if (raw == NULL || raw_n == 0 || raw_n >= sizeof(digits)) {
+        if (raw == NULL || raw_n == 0 || k >= raw_n
+            || !all_digits(raw + k, (size_t)(raw_n - k))) {
+            return scalar_string(doc, node);
+        }
+        if (raw_n >= sizeof(digits)) {
             /* Too long for the stack buffer: build it as an R string. */
-            txt = PROTECT(Rf_mkCharLenCE(raw ? raw : "", (int)raw_n, CE_UTF8));
+            txt = PROTECT(Rf_mkCharLenCE(raw, (int)raw_n, CE_UTF8));
             out = PROTECT(big_integer(ctx, CHAR(txt), R_PosInf));
             UNPROTECT(2);
             return out;
@@ -277,6 +303,143 @@ static SEXP scalar_bool(const cyaml_doc_t* doc, const cyaml_node_t* node)
 }
 
 /*
+ * YAML tags.
+ *
+ * A tag overrides schema resolution: `!!str 12` is the string "12", not the
+ * integer 12, and the non-specific tag `!` forces string resolution too.
+ * Without this, tagged scalars were resolved as though untagged.
+ *
+ * Tags are compared in both spellings cyaml may hand back: the shorthand
+ * (`!!str`) and the fully resolved form (`tag:yaml.org,2002:str`).
+ */
+typedef enum {
+    ZUYAML_TAG_NONE = 0,
+    ZUYAML_TAG_STR,
+    ZUYAML_TAG_INT,
+    ZUYAML_TAG_FLOAT,
+    ZUYAML_TAG_BOOL,
+    ZUYAML_TAG_NULL,
+    ZUYAML_TAG_COLLECTION, /* !!seq, !!map -- no effect on a scalar */
+    ZUYAML_TAG_UNKNOWN /* an application tag */
+} zuyaml_tag_t;
+
+static bool tag_is(const char* s, size_t n, const char* shorthand,
+    const char* resolved)
+{
+    size_t sn = strlen(shorthand), rn = strlen(resolved);
+
+    if (n == sn && memcmp(s, shorthand, sn) == 0) {
+        return true;
+    }
+    return n == rn && memcmp(s, resolved, rn) == 0;
+}
+
+/*
+ * Has a %TAG directive redefined this shorthand handle?
+ *
+ * `%TAG !! tag:example.com,2000:app/` makes `!!int` an application tag, not
+ * the core integer tag. cyaml records directives on the document but hands
+ * back the tag text unexpanded, so the handle has to be checked before a
+ * shorthand can be trusted to mean what it usually means.
+ */
+static bool handle_is_redefined(const cyaml_doc_t* doc, const char* handle,
+    size_t handle_n)
+{
+    uint8_t i;
+
+    if (doc == NULL) {
+        return false;
+    }
+    for (i = 0; i < doc->tag_count; i++) {
+        const cyaml_span_t* h = &doc->tags[i].handle;
+        const char* text = cyaml_span_ptr(doc, *h);
+
+        if (text != NULL && h->len == handle_n
+            && memcmp(text, handle, handle_n) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static zuyaml_tag_t classify_tag(const cyaml_doc_t* doc, const char* s,
+    size_t n)
+{
+    if (s == NULL || n == 0) {
+        return ZUYAML_TAG_NONE;
+    }
+    /* A redefined handle means the shorthand no longer names a core tag. */
+    if (n >= 2 && s[0] == '!' && s[1] == '!'
+        && handle_is_redefined(doc, "!!", 2)) {
+        return ZUYAML_TAG_UNKNOWN;
+    }
+    if (n >= 1 && s[0] == '!' && !(n >= 2 && s[1] == '!')
+        && handle_is_redefined(doc, "!", 1)) {
+        return ZUYAML_TAG_UNKNOWN;
+    }
+    /* The non-specific tag `!` means "resolve as a string". */
+    if (n == 1 && s[0] == '!') {
+        return ZUYAML_TAG_STR;
+    }
+    if (tag_is(s, n, "!!str", "tag:yaml.org,2002:str")) {
+        return ZUYAML_TAG_STR;
+    }
+    if (tag_is(s, n, "!!int", "tag:yaml.org,2002:int")) {
+        return ZUYAML_TAG_INT;
+    }
+    if (tag_is(s, n, "!!float", "tag:yaml.org,2002:float")) {
+        return ZUYAML_TAG_FLOAT;
+    }
+    if (tag_is(s, n, "!!bool", "tag:yaml.org,2002:bool")) {
+        return ZUYAML_TAG_BOOL;
+    }
+    if (tag_is(s, n, "!!null", "tag:yaml.org,2002:null")) {
+        return ZUYAML_TAG_NULL;
+    }
+    if (tag_is(s, n, "!!seq", "tag:yaml.org,2002:seq")
+        || tag_is(s, n, "!!map", "tag:yaml.org,2002:map")) {
+        return ZUYAML_TAG_COLLECTION;
+    }
+    return ZUYAML_TAG_UNKNOWN;
+}
+
+/* The node's tag text, or NULL when it carries none. */
+static const char* node_tag(const cyaml_doc_t* doc, const cyaml_node_t* node,
+    uint32_t* len)
+{
+    *len = node->tag.len;
+    if (node->tag.len == 0) {
+        return NULL;
+    }
+    return cyaml_span_ptr(doc, node->tag);
+}
+
+/*
+ * Refuse an application tag when tags = "error".
+ *
+ * The default is to ignore it and convert the value normally. Erroring would
+ * reject a large amount of ordinary YAML -- more than twenty documents in the
+ * upstream test suite carry application tags and are perfectly valid -- so it
+ * is opt-in rather than the default. See the design's tags section.
+ */
+static void check_unknown_tag(zuyaml_ctx_t* ctx, const cyaml_node_t* node,
+    const char* tag, uint32_t tag_n)
+{
+    if (!ctx->tag_error) {
+        return;
+    }
+    {
+        /* A document root's own span is zeroed, so fall back to the tag's. */
+        const cyaml_span_t* at = node->span.start_line ? &node->span
+                                                       : &node->tag;
+        zuyaml_stopf("unsupported_tag", NULL,
+            "Unsupported YAML tag '%.*s' at line %u, column %u.",
+            (int)tag_n, tag, (unsigned)at->start_line,
+            (unsigned)at->start_col);
+    }
+}
+
+/*
  * Classify a scalar with YAML 1.2 core schema rules.
  *
  * cyaml_scalar_kind() returns CYAML_KIND_STRING for every quoted scalar, which
@@ -287,6 +450,30 @@ static SEXP scalar_bool(const cyaml_doc_t* doc, const cyaml_node_t* node)
 static SEXP convert_scalar(const cyaml_doc_t* doc, const cyaml_node_t* node,
     zuyaml_ctx_t* ctx)
 {
+    uint32_t tag_n = 0;
+    const char* tag = node_tag(doc, node, &tag_n);
+
+    /* A tag overrides schema resolution. */
+    switch (classify_tag(doc, tag, (size_t)tag_n)) {
+    case ZUYAML_TAG_STR:
+        return scalar_string(doc, node);
+    case ZUYAML_TAG_INT:
+        return scalar_int(doc, node, ctx);
+    case ZUYAML_TAG_FLOAT:
+        return scalar_double(doc, node);
+    case ZUYAML_TAG_BOOL:
+        return scalar_bool(doc, node);
+    case ZUYAML_TAG_NULL:
+        return R_NilValue;
+    case ZUYAML_TAG_UNKNOWN:
+        check_unknown_tag(ctx, node, tag, tag_n);
+        break;
+    case ZUYAML_TAG_COLLECTION:
+    case ZUYAML_TAG_NONE:
+    default:
+        break;
+    }
+
     /* Only *plain* scalars are resolved against the schema. Quoted, literal
        and folded scalars are strings by construction, whatever their text
        looks like. cyaml_scalar_kind() gets the quoted cases right but reports
@@ -663,8 +850,24 @@ SEXP zuyaml_convert_node(const cyaml_doc_t* doc, const cyaml_node_t* node,
     }
 
     switch (node->type) {
-    case CYAML_NULL:
+    case CYAML_NULL: {
+        /* An empty node may still be tagged. `- !!str` with no content is the
+           empty string, and cyaml represents it as a null node, so the tag has
+           to be consulted before defaulting to NULL. */
+        uint32_t tag_n = 0;
+        const char* tag = node_tag(doc, node, &tag_n);
+
+        switch (classify_tag(doc, tag, (size_t)tag_n)) {
+        case ZUYAML_TAG_STR:
+            return Rf_ScalarString(Rf_mkCharLenCE("", 0, CE_UTF8));
+        case ZUYAML_TAG_UNKNOWN:
+            check_unknown_tag(ctx, node, tag, tag_n);
+            break;
+        default:
+            break;
+        }
         return R_NilValue;
+    }
 
     case CYAML_SCALAR:
         return convert_scalar(doc, node, ctx);
@@ -681,6 +884,13 @@ SEXP zuyaml_convert_node(const cyaml_doc_t* doc, const cyaml_node_t* node,
             zuyaml_stopf("limit_depth", NULL,
                 "YAML nesting exceeds max_depth (%u).",
                 (unsigned)ctx->max_depth);
+        }
+        {
+            uint32_t tag_n = 0;
+            const char* tag = node_tag(doc, node, &tag_n);
+            if (classify_tag(doc, tag, (size_t)tag_n) == ZUYAML_TAG_UNKNOWN) {
+                check_unknown_tag(ctx, node, tag, tag_n);
+            }
         }
         ctx->depth++;
         out = (node->type == CYAML_SEQ) ? convert_seq(doc, node, ctx, anc)

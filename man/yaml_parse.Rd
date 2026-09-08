@@ -10,6 +10,7 @@ yaml_parse(
   simplify = FALSE,
   aliases = c("resolve", "error"),
   big_integers = c("bigint", "double", "error"),
+  tags = c("ignore", "error"),
   duplicate_keys = FALSE,
   max_depth = 128L,
   max_size = 64 * 1024^2,
@@ -22,6 +23,7 @@ yaml_parse_all(
   simplify = FALSE,
   aliases = c("resolve", "error"),
   big_integers = c("bigint", "double", "error"),
+  tags = c("ignore", "error"),
   duplicate_keys = FALSE,
   max_depth = 128L,
   max_size = 64 * 1024^2,
@@ -46,6 +48,13 @@ type to hold exactly (beyond 2^53). \code{"bigint"} (the default) returns a
 \link{zuyaml_bigint} character vector holding the decimal value, \code{"double"} is
 an explicit opt-in to lossy conversion, and \code{"error"} refuses the
 document. The package never loses integer precision silently.}
+
+\item{tags}{How to treat an application tag such as \code{!duration}. Core
+schema tags (\code{!!str}, \code{!!int}, \code{!!float}, \code{!!bool}, \code{!!null}) always
+override resolution, so \verb{!!str 12} is the string \code{"12"}. \code{"ignore"} (the
+default) converts a tagged value as though it were untagged; \code{"error"}
+rejects the document. Ignoring is the default because rejecting would
+refuse a great deal of ordinary YAML.}
 
 \item{duplicate_keys}{If \code{FALSE} (the default), a mapping with duplicate
 keys is an error. If \code{TRUE}, duplicates become duplicate names in the

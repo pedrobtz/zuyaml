@@ -595,15 +595,30 @@ Never attempt to manufacture recursively self-referential R lists.
 
 ### 6.6 Tags
 
-- Standard core tags participate in normal scalar conversion.
-- Unknown explicit application tags are an **error**, not silently discarded.
+- Standard core tags participate in normal scalar conversion. `!!str 12` is the
+  string `"12"`, and the non-specific tag `!` forces string resolution too.
+- A `%TAG` directive that redefines a handle is honoured: after
+  `%TAG !! tag:example.com,2000:app/`, `!!int` is an *application* tag and
+  `!!int 1 - 3` stays the string `"1 - 3"`.
+- Unknown application tags are **ignored by default**, with `tags = "error"`
+  available to refuse them.
 
-```yaml
-value: !duration 5m
-```
+> **Changed from the original design, on evidence.** This section previously
+> specified that unknown tags must always error. Implementing that showed it
+> rejects a great deal of perfectly ordinary YAML — more than twenty documents
+> in the upstream test suite carry application tags and are valid, including
+> Spec Example 2.27, whose root is tagged
+> `!<tag:clarkevans.com,2002:invoice>`. A parser that refuses the spec's own
+> examples is not usable. Erroring remains available for callers who want to
+> know that they are dropping semantics.
 
-```text
-Unsupported YAML tag "!duration" at line 1, column 8.
+```r
+yaml_parse("value: !duration 5m")
+#> $value
+#> [1] "5m"
+
+yaml_parse("value: !duration 5m", tags = "error")
+#> Error: Unsupported YAML tag '!duration' at line 1, column 8.
 ```
 
 The tag text and location come from the node's `tag` span. A future API may add

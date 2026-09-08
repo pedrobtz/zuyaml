@@ -89,8 +89,8 @@ static uint32_t as_uint32(SEXP x, const char* arg, SEXP path)
  * the first document.
  */
 SEXP zuyaml_parse_(SEXP x, SEXP simplify, SEXP aliases, SEXP big_integers,
-    SEXP duplicate_keys, SEXP max_depth, SEXP max_size, SEXP max_nodes,
-    SEXP path)
+    SEXP tags, SEXP duplicate_keys, SEXP max_depth, SEXP max_size,
+    SEXP max_nodes, SEXP path)
 {
     const char* src;
     size_t len;
@@ -131,6 +131,7 @@ SEXP zuyaml_parse_(SEXP x, SEXP simplify, SEXP aliases, SEXP big_integers,
     ctx.max_depth = opts.max_depth;
     ctx.depth = 0;
     ctx.alias_error = (strcmp(CHAR(STRING_ELT(aliases, 0)), "error") == 0);
+    ctx.tag_error = (strcmp(CHAR(STRING_ELT(tags, 0)), "error") == 0);
     ctx.max_nodes = Rf_asReal(max_nodes);
     ctx.nodes = 0;
     {

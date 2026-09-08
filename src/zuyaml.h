@@ -45,8 +45,8 @@ _Noreturn void zuyaml_stopf(
 
 /* .Call entry points (registered in init.c). */
 SEXP zuyaml_parse_(SEXP x, SEXP simplify, SEXP aliases, SEXP big_integers,
-    SEXP duplicate_keys, SEXP max_depth, SEXP max_size, SEXP max_nodes,
-    SEXP path);
+    SEXP tags, SEXP duplicate_keys, SEXP max_depth, SEXP max_size,
+    SEXP max_nodes, SEXP path);
 
 /*
  * Options threaded through the conversion recursion. Kept as a struct so that
@@ -64,6 +64,7 @@ typedef struct {
     bool simplify;
     bool duplicate_keys;
     bool alias_error; /* aliases = "error" */
+    bool tag_error; /* tags = "error" */
     zuyaml_bigint_policy_t big_integers;
     uint32_t max_depth; /* 0 = unlimited */
     uint32_t depth; /* current nesting depth during conversion */

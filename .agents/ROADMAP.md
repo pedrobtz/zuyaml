@@ -271,11 +271,11 @@ files and raw bodies without reaching into internals.
   scalars, empty block scalars returning `NULL`, and an alias used as a mapping
   key collapsing the whole mapping into a `zuyaml_map`.
 
-  Not compared: multi-document cases, whose `in.json` concatenates one value
-  per document and needs an incremental parser to split. Known differences:
-  collection-valued keys (JSON flattens what `zuyaml_map` preserves) and tags,
-  which are **specified in design §6.6 but not implemented** — `!!str 12`
-  should be the string `"12"`.
+  Agreement is now **977 of 990**. Not compared: multi-document cases, whose
+  `in.json` concatenates one value per document and needs an incremental parser
+  to split, and number typing and key order, which JSON cannot represent. One
+  known difference remains: collection-valued keys, where JSON flattens what
+  `zuyaml_map` preserves.
 
 ---
 

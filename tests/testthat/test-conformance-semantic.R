@@ -12,11 +12,15 @@
 #     returned the raw span verbatim;
 #   * empty block scalars came back as NULL instead of "";
 #   * an alias used as a mapping key turned the whole mapping into a
-#     zuyaml_map.
+#     zuyaml_map;
+#   * tags were ignored entirely, so `!!str 12` gave the integer 12;
+#   * a %TAG directive redefining `!!` was not honoured, so `!!int 1 - 3`
+#     became a zuyaml_bigint holding "1 - 3".
 #
-# Two allowances are made for JSON's own limits, and one construct is a known
-# gap. All three are listed in `expected_mismatch` below, so this file records
-# exactly where the package and the reference part company, and why.
+# Two allowances are made for JSON's own limits (number typing and key order),
+# and one construct differs by design. That one is listed in
+# `expected_mismatch` below, so this file records exactly where the package and
+# the reference part company, and why.
 
 skip_if_not_installed("jsonlite")
 
@@ -55,11 +59,7 @@ expected_mismatch <- c(
   # JSON cannot express a mapping whose key is a sequence, so the reference
   # flattens it. zuyaml_map preserves the structure instead, which is strictly
   # more faithful -- see the design's mapping section.
-  "WZ62",
-  # Tags are not yet honoured: `!!str 12` should be the string "12", and a
-  # bare `!` forces a string too. The design specifies this (core tags take
-  # part in scalar conversion, unknown tags error); it is not implemented.
-  "LE5A", "S4JQ"
+  "WZ62"
 )
 
 semantic_cases <- function() {
@@ -168,4 +168,55 @@ test_that("an alias may be a mapping key", {
   x <- yaml_parse("top: &a key\nmap:\n  *a : value\n")
   expect_false(inherits(x$map, "zuyaml_map"))
   expect_identical(x$map, list(key = "value"))
+})
+
+test_that("tags override schema resolution", {
+  # A tag decides the type, whatever the text looks like.
+  expect_identical(yaml_parse("!!str 12"), "12")
+  expect_identical(yaml_parse("! 12"), "12") # non-specific tag
+  expect_identical(yaml_parse('!!int "12"'), 12L)
+  expect_identical(yaml_parse('!!bool "true"'), TRUE)
+  expect_identical(yaml_parse("!!float 1"), 1)
+  expect_null(yaml_parse("!!null anything"))
+
+  # An empty tagged node is still tagged: cyaml represents it as a null node,
+  # so the tag must be consulted before defaulting to NULL.
+  expect_identical(yaml_parse("- !!str\n"), list(""))
+
+  # Untagged resolution is unaffected.
+  expect_identical(yaml_parse("12"), 12L)
+})
+
+test_that("a %TAG directive redefining a handle is honoured", {
+  # `%TAG !! ...` makes !!int an application tag, not the core integer tag, so
+  # this interval stays a string rather than becoming a bigint.
+  expect_identical(
+    yaml_parse("%TAG !! tag:example.com,2000:app/\n---\n!!int 1 - 3\n"),
+    "1 - 3"
+  )
+})
+
+test_that("application tags are ignored by default and can be refused", {
+  # Rejecting by default would refuse a great deal of ordinary YAML: more than
+  # twenty documents in the upstream suite carry application tags and are
+  # valid.
+  expect_identical(yaml_parse("v: !duration 5m"), list(v = "5m"))
+
+  err <- tryCatch(
+    yaml_parse("v: !duration 5m", tags = "error"),
+    zuyaml_error = identity
+  )
+  expect_identical(err$code, "unsupported_tag")
+  expect_match(conditionMessage(err), "!duration")
+  expect_match(conditionMessage(err), "line [0-9]+, column [0-9]+")
+
+  # Core tags are never "unsupported", whatever the policy.
+  expect_identical(yaml_parse("!!str 12", tags = "error"), "12")
+})
+
+test_that("an explicit int tag on non-integer text does not become a bigint", {
+  # The bigint fallback exists for integers beyond uint64, and must not be
+  # reached by text that is not an integer at all.
+  expect_identical(yaml_parse("!!int 1 - 3"), "1 - 3")
+  expect_false(inherits(yaml_parse("!!int nonsense"), "zuyaml_bigint"))
 })

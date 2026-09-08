@@ -103,10 +103,11 @@ trip, and the three options that do nothing.
 ### Blocking a 1.0
 
 - **ASan/UBSan green run** — fixed but unobserved (M6 exit criterion).
-- **Tag handling.** Design §6.6 specifies that core tags take part in scalar
-  conversion and that unknown tags error. Neither is implemented: `!!str 12`
-  parses as the integer 12, and an unknown tag is silently ignored. Found by
-  the semantic conformance comparison, which now records it as a known gap.
+- ~~Tag handling~~ — **done.** Core tags override resolution, `%TAG` handle
+  redefinition is honoured, and application tags are ignored by default with
+  `tags = "error"` to refuse them. The design's original "always error" default
+  was changed on evidence: it rejected more than twenty valid documents in the
+  upstream suite, including a spec example.
 - **Three open questions** (design §22): key stringification, eight-versus-five
   functions, and whether `zuyaml_bigint` and `zuyaml_map` belong in 1.0. All are
   breaking changes afterwards.
