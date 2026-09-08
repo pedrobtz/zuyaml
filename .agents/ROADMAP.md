@@ -66,7 +66,7 @@ Remaining: **M7**.
 | M3 ✅ | Hard cases | 0.2.0 | L | No silent semantic loss |
 | M4 ✅ | Emitter | 0.3.0 | L | Round trips hold, including numeric strings |
 | M5 ✅ | Files and integration | 0.4.0 | S | Usable as a dependency |
-| M6 ✅ | Conformance and hardening | 0.5.0 | L | Demonstrably robust |
+| M6 ◐ | Conformance and hardening | 0.5.0 | L | Demonstrably robust |
 | M7 | Freeze and release | 0.9.0 → 1.0.0 | M | CRAN-accepted, API committed |
 
 M2 blocks everything after it. M3 and M4 are genuinely parallelisable if you want
@@ -255,11 +255,20 @@ files and raw bodies without reaching into internals.
   confirms the zero-copy scalar path was worth it.
 
 **Exit:**
-- Full suite green, with any deviations documented as known and intentional.
-- Clean ASan/UBSan across the test suite and fuzz corpus.
-- No leaks on repeated failure paths.
-- Benchmark numbers recorded, and any performance claim in the README traceable
-  to them.
+- ✅ Full suite green, with any deviations documented as known and intentional.
+  333/333 agreement on valid-versus-invalid, no crashes, no bare R errors.
+- ❌ **Clean ASan/UBSan across the test suite and fuzz corpus.** Not yet
+  demonstrated. The sanitizer jobs failed on their first line for two runs
+  (`set -o pipefail` is not available in the containers' `sh`), so they had
+  never executed a single test. Fixed; awaiting a green run.
+- ✅ No leaks on repeated failure paths — as far as a plain R heap check can
+  show. The real evidence is the ASan run above, so this is provisional.
+- ✅ Benchmark numbers recorded; no performance claim is made anywhere.
+- ❌ **Semantic conformance.** The tests assert only that valid documents parse
+  and invalid ones fail. The `in.json` comparison this milestone specifies —
+  checking the parsed R object against the suite's own JSON equivalent — is not
+  implemented, so *what* a document parses to is verified only by the package's
+  own tests, never against an external reference.
 
 ---
 
