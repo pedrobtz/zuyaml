@@ -1,0 +1,242 @@
+---
+title: "Converting between YAML and R"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Converting between YAML and R}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+```{r setup}
+library(zuyaml)
+```
+
+`zuyaml` converts between YAML 1.2 and ordinary R objects. This vignette
+documents the conversion rules, which are part of the package's contract: they
+are meant to be predictable rather than clever, and every place where
+information is lost is listed at the end.
+
+## The API
+
+Eight functions, on one rule: **`_all` means "YAML stream"**.
+
+|            | one document     | stream of documents  |
+|------------|------------------|----------------------|
+| parse text | `yaml_parse()`   | `yaml_parse_all()`   |
+| emit text  | `yaml_emit()`    | `yaml_emit_all()`    |
+| read file  | `yaml_read()`    | `yaml_read_all()`    |
+| write file | `yaml_write()`   | `yaml_write_all()`   |
+
+A YAML *stream* holds several documents separated by `---`. It is a different
+thing from a *sequence*, and the API keeps them apart: `yaml_parse()` refuses
+anything but exactly one document, so trailing documents are never silently
+discarded.
+
+```{r}
+yaml_parse("a: 1")
+
+yaml_parse_all("---\na: 1\n---\nb: 2\n")
+
+try(yaml_parse("---\na: 1\n---\nb: 2\n"))
+```
+
+An empty stream is an error rather than `NULL`, because `NULL` is the
+legitimate result of parsing a document whose content is `null`.
+
+## Scalars
+
+Scalars follow the YAML 1.2 **core schema**. The most visible consequence is
+that `yes` and `no` are strings, not booleans — that was a YAML 1.1 rule.
+
+```{r}
+str(yaml_parse("[null, true, 42, 3.14, hello, yes, 2026-09-07]"))
+```
+
+Dates stay strings: turning them into `Date` would be policy beyond a parser's
+job. Quoted scalars are always strings, so quoting is how you protect a value
+that would otherwise look like a number.
+
+```{r}
+str(yaml_parse('[42, "42"]'))
+```
+
+`.inf` and `.nan` map to `Inf` and `NaN`, and an empty *quoted* string stays a
+string rather than becoming `NULL`.
+
+```{r}
+str(yaml_parse('["", ~, .inf]'))
+```
+
+### Large integers
+
+R has no exact integer type beyond 2^53. Rather than round silently, values
+past that point become a `zuyaml_bigint`, a character vector holding the
+decimal value.
+
+```{r}
+x <- yaml_parse("9223372036854775807")
+x
+class(x)
+```
+
+It carries the decimal normalisation, not the source text, so hexadecimal input
+compares equal to its decimal spelling:
+
+```{r}
+as.character(yaml_parse("0x7FFFFFFFFFFFFFFF"))
+```
+
+Use `big_integers` to choose a different policy — `"double"` opts in to losing
+precision, `"error"` refuses the document.
+
+```{r}
+yaml_parse("9223372036854775807", big_integers = "double")
+```
+
+## Sequences and mappings
+
+A sequence becomes a list, and a mapping with scalar keys becomes a named list.
+
+```{r}
+str(yaml_parse("- 1\n- two\n- true\n"))
+str(yaml_parse("host: localhost\nport: 8080\n"))
+```
+
+`simplify = TRUE` collapses sequences whose elements are all scalars of one
+type. It is **not** the default, because it makes the shape of the result
+depend on the contents of the document: `[1, 2]` would give an integer vector
+while `[1, "a"]` gives a list, so code that indexes the result would be correct
+only for the inputs its author happened to test.
+
+```{r}
+str(yaml_parse("[1, 2, 3]"))
+str(yaml_parse("[1, 2, 3]", simplify = TRUE))
+```
+
+### Duplicate keys
+
+Rejected by default, because the resulting object would be ambiguous to index.
+
+```{r}
+try(yaml_parse("a: 1\na: 2\n"))
+```
+
+Non-string scalar keys are stringified, so `1` and `"1"` would collide as R
+names. That collision is caught too rather than quietly producing duplicate
+names.
+
+```{r}
+str(yaml_parse("1: a\n2: b\n"))
+try(yaml_parse('1: a\n"1": b\n'))
+```
+
+### Keys that are not scalars
+
+YAML allows a sequence or mapping to be a key. Such a mapping cannot become a
+named list without destroying structure, so it becomes a `zuyaml_map`: two
+parallel lists, `keys` and `values`.
+
+```{r}
+yaml_parse("? [one, two]\n: value\n")
+```
+
+## Anchors and aliases
+
+Aliases are resolved to the value of their target. Node identity is not
+preserved — R has no portable way to express it.
+
+```{r}
+str(yaml_parse("defaults: &d\n  timeout: 30\nserver: *d\n"))
+```
+
+Cycles are refused, and `aliases = "error"` rejects aliases outright.
+
+## Emitting
+
+```{r}
+cat(yaml_emit(list(host = "localhost", port = 8080L, tls = TRUE)))
+```
+
+Strings that would resolve as another type under the core schema are quoted, so
+they survive a round trip:
+
+```{r}
+cat(yaml_emit(list(version = "42", ratio = 0.5, name = "true")))
+```
+
+Ambiguous input is refused rather than guessed at. A partially named list has
+no obvious meaning as either a sequence or a mapping:
+
+```{r}
+try(yaml_emit(list(a = 1, 2)))
+try(yaml_emit(data.frame(a = 1)))
+```
+
+`list()` cannot express both an empty sequence and an empty mapping, so it
+emits as `[]`, and an empty *named* list is how you ask for `{}`.
+
+```{r}
+cat(yaml_emit(list()))
+cat(yaml_emit(structure(list(), names = character())))
+```
+
+## Untrusted input
+
+Three limits apply, all enforced by `zuyaml` itself:
+
+- `max_size` — input bytes;
+- `max_depth` — nesting depth;
+- `max_nodes` — total values materialised.
+
+The third exists because the first two do not bound *alias expansion*. A
+billion-laughs document is small and shallow by construction, yet expands
+exponentially:
+
+```{r}
+bomb <- paste0(
+  "a: &a [x,x,x,x,x,x,x,x,x]\n",
+  "b: &b [*a,*a,*a,*a,*a,*a,*a,*a,*a]\n",
+  "c: &c [*b,*b,*b,*b,*b,*b,*b,*b,*b]\n",
+  "d: &d [*c,*c,*c,*c,*c,*c,*c,*c,*c]\n",
+  "e: [*d,*d,*d,*d,*d,*d,*d,*d,*d]\n"
+)
+nchar(bomb)
+try(yaml_parse(bomb, max_nodes = 1000))
+```
+
+## Errors
+
+Failures are classed conditions carrying a stable code and a position, so
+callers never have to match on message text.
+
+```{r}
+err <- tryCatch(yaml_parse("a: [1, 2"), zuyaml_error = identity)
+err$code
+err$line
+err$column
+```
+
+## What does not round-trip
+
+Every entry below is a deliberate trade-off, not an oversight.
+
+| Construct | Behaviour | Round-trips? |
+|---|---|---|
+| Comments | Discarded | No |
+| Quoting and block style | Re-chosen on emit | Semantically |
+| Anchors and aliases | Resolved to values | Semantically |
+| Non-string scalar keys | Stringified (`1` → `"1"`) | Semantically |
+| Collection-valued keys | `zuyaml_map` on parse | **No** — cannot be emitted |
+| Duplicate keys (opt-in) | Duplicate R names | **No** — cannot be emitted |
+| `NA` | Emitted as `null`, parses back as `NULL` | **No** |
+| `list(1L)` vs `c(1L)` | Both emit `- 1` | **No** |
+| Whole-numbered doubles | Emit as `42`, parse back as integer | Numerically |
+| `big_integers = "double"` | Precision lost | No (opt-in) |
+
+`zuyaml` is a semantic parser, not a round-trip editor: it converts values, and
+formatting is not part of the value. Preserving comments and layout would need
+a different API built on a retained document.
