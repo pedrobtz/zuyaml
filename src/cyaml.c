@@ -547,7 +547,14 @@ bool cyaml_doc_append(cyaml_doc_t* doc, const char* data, size_t len, uint32_t* 
 
     if (out_off)
         *out_off = doc->src.owned.len;
-    memcpy(doc->src.owned.ptr + doc->src.owned.len, data, len);
+    /* zuyaml patch: appending zero bytes to a document whose buffer has not
+       been allocated yet leaves owned.ptr NULL -- `needed` is 0, so the growth
+       branch above is skipped -- and memcpy() is declared nonnull, so
+       memcpy(NULL, data, 0) is undefined behaviour even though it copies
+       nothing. UBSan and both ASan builds report it. Reached from
+       cyaml_new_str(doc, "", 0), i.e. emitting an empty string. */
+    if (len > 0)
+        memcpy(doc->src.owned.ptr + doc->src.owned.len, data, len);
     doc->src.owned.len += (uint32_t)len;
     return true;
 }

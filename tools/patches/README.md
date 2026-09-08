@@ -66,3 +66,37 @@ unquoted and change type.
 
 **Worth reporting upstream:** the parse-then-emit case is a bug in cyaml
 independent of zuyaml.
+
+## 0003-doc-append-zero-length.patch
+
+**Why it is required:** `cyaml_doc_append()` copies with
+
+```c
+memcpy(doc->src.owned.ptr + doc->src.owned.len, data, len);
+```
+
+When the first append to a fresh document has `len == 0`, `needed` is also 0,
+so the buffer-growth branch above never runs and `owned.ptr` is still `NULL`.
+`memcpy` is declared `nonnull`, so `memcpy(NULL, data, 0)` is undefined
+behaviour even though it copies nothing.
+
+`cyaml_new_str(doc, "", 0)` reaches it, which means `yaml_emit("")` — emitting
+an empty string — is enough to trigger it.
+
+**What it does:** skips the copy when there is nothing to copy.
+
+**How it was found:** UndefinedBehaviorSanitizer, and both ASan builds,
+reported it identically:
+
+```
+cyaml.c:550: runtime error: null pointer passed as argument 1,
+             which is declared to never be null
+  cyaml_doc_append ← cyaml_new_str ← new_string_node ← build_element
+```
+
+Nothing else caught it — not the test suite, not the fuzzer, not valgrind,
+which does not check `nonnull` attributes. CRAN runs UBSan builds, so this
+would have surfaced there.
+
+**Worth reporting upstream:** it is a real defect independent of zuyaml, and
+reachable from any caller that appends an empty string.
