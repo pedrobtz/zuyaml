@@ -1,0 +1,10 @@
+pandoc: 3.8.3
+pkgdown: 2.2.1
+pkgdown_sha: ~
+articles:
+  articles/kubernetes-crd: kubernetes-crd.html
+  articles/zuyaml: zuyaml.html
+last_built: 2026-09-09T12:43Z
+urls:
+  reference: https://pedrobtz.github.io/zuyaml/reference
+  article: https://pedrobtz.github.io/zuyaml/articles
