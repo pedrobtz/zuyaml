@@ -245,10 +245,12 @@ yaml_parse(
   simplify      = FALSE,
   aliases       = c("resolve", "error"),
   big_integers  = c("bigint", "double", "error"),
+  tags          = c("ignore", "error"),
   duplicate_keys = FALSE,
   max_depth     = 128L,
   max_size      = 64 * 1024^2,
-  max_nodes     = 1e6
+  max_nodes     = 1e6,
+  path          = NULL
 )
 
 yaml_parse_all(x, ...)          # same arguments; returns a list of documents
@@ -597,11 +599,25 @@ Never attempt to manufacture recursively self-referential R lists.
 
 - Standard core tags participate in normal scalar conversion. `!!str 12` is the
   string `"12"`, and the non-specific tag `!` forces string resolution too.
+- Every spelling of a core tag is recognised: the shorthand `!!str`, the
+  verbatim form `!<tag:yaml.org,2002:str>`, and a named handle bound to the
+  core prefix by `%TAG !e! tag:yaml.org,2002:`. A tag is expanded against the
+  document's `%TAG` directives before it is compared.
 - A `%TAG` directive that redefines a handle is honoured: after
   `%TAG !! tag:example.com,2000:app/`, `!!int` is an *application* tag and
-  `!!int 1 - 3` stays the string `"1 - 3"`.
+  `!!int 1 - 3` stays the string `"1 - 3"`. It is the *prefix* that decides
+  this, not the handle: `%TAG !! tag:yaml.org,2002:` is legal and restates the
+  default, so it changes nothing. The non-specific tag `!` is a separate
+  production from the primary handle and is not substituted, so a `%TAG !`
+  directive leaves `! 12` as the string `"12"`.
+- A core tag on text that does not conform to it resolves as a string, which is
+  what an unresolvable scalar is in YAML: `!!int nonsense`, `!!float abc` and
+  `!!bool notabool` are all their own text. Erroring instead would reject
+  documents that parsed before tags were honoured at all.
 - Unknown application tags are **ignored by default**, with `tags = "error"`
-  available to refuse them.
+  available to refuse them. The policy applies on the key side of a mapping as
+  well as the value side, even though a key is stringified rather than
+  converted.
 
 > **Changed from the original design, on evidence.** This section previously
 > specified that unknown tags must always error. Implementing that showed it
@@ -834,8 +850,8 @@ Two, not three:
 
 ```c
 SEXP zuyaml_parse_(SEXP x, SEXP simplify, SEXP aliases, SEXP big_integers,
-                   SEXP duplicate_keys, SEXP max_depth, SEXP max_size,
-                   SEXP max_nodes);
+                   SEXP tags, SEXP duplicate_keys, SEXP max_depth,
+                   SEXP max_size, SEXP max_nodes, SEXP path);
 
 SEXP zuyaml_emit_(SEXP x, SEXP indent, SEXP width,
                   SEXP document_start, SEXP document_end);

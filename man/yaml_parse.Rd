@@ -71,7 +71,7 @@ billion-laughs document is small and shallow, so neither \code{max_size} nor
 headroom a very large document needs.}
 
 \item{path}{Optional file path, used only to make error messages more
-informative. Set by the file-reading functions in a later milestone.}
+informative. \code{\link[=yaml_read]{yaml_read()}} and its companions set it for you.}
 }
 \value{
 \code{yaml_parse()} returns an R object. \code{yaml_parse_all()} returns a
@@ -97,6 +97,12 @@ the legitimate result of parsing a document whose content is \code{null}.
 Comment-only input is a zero-document stream.
 }
 \examples{
-yaml_parse("null")
-yaml_parse_all("---\nnull\n---\nnull\n")
+yaml_parse("host: localhost\nport: 8080\ntls: true\n")
+
+# The core schema, not YAML 1.1: `yes` is a string, and a quoted number
+# stays a string.
+str(yaml_parse("answer: yes\nversion: \"42\"\n"))
+
+# A stream is not a sequence: one element per document.
+yaml_parse_all("---\nfirst\n---\nsecond\n")
 }

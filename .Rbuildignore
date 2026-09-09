@@ -3,6 +3,11 @@
 ^\.github$
 ^LICENSE\.md$
 ^\.agents$
+^\.covrignore$
 ^doc$
 ^Meta$
 ^cran-comments\.md$
+^vignettes/articles$
+^_pkgdown\.yml$
+^docs$
+^pkgdown$

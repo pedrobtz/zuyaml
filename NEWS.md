@@ -19,6 +19,11 @@ version if you depend on it.
 * Integers beyond 2^53 are preserved as `zuyaml_bigint` rather than silently
   rounded. `big_integers` selects a different policy.
 
+* Tags override schema resolution, so `!!str 12` is the string `"12"`, in every
+  spelling a core tag has: the shorthand, the verbatim form, and a handle bound
+  by a `%TAG` directive. Application tags such as `!duration` are ignored by
+  default; `tags = "error"` refuses them.
+
 * Mappings whose keys are sequences or mappings become `zuyaml_map` rather than
   having their structure flattened into names. This is parse-only.
 
@@ -35,4 +40,5 @@ version if you depend on it.
   contents of the document.
 
 * The `cyaml` C library is bundled and pinned to v0.1.3. See `inst/COPYRIGHTS`
-  for licensing and the two modifications made for R compatibility.
+  for licensing and the modifications made for R compatibility, and
+  `tools/patches/README.md` for why each one is required.

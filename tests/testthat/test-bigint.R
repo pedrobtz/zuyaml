@@ -79,3 +79,59 @@ test_that("sequences of big integers are never simplified", {
   expect_type(x, "list")
   expect_s3_class(x[[1]], "zuyaml_bigint")
 })
+
+test_that("integers beyond uint64 are normalised and approximated", {
+  # Past uint64 only the source text is available, so the normalisation and
+  # the lossy double both have to be derived from it.
+  huge <- strrep("9", 40)
+
+  expect_identical(as.character(yaml_parse(huge)), huge)
+
+  # A leading '+' and leading zeros are not part of the value: +007 and 7 must
+  # give the same bigint, or comparison of parsed values is unreliable.
+  expect_identical(
+    unclass(yaml_parse(paste0("+", huge))),
+    unclass(yaml_parse(huge))
+  )
+  expect_identical(
+    unclass(yaml_parse(paste0(strrep("0", 10), huge))),
+    unclass(yaml_parse(huge))
+  )
+  expect_identical(as.character(yaml_parse(paste0("-", huge))),
+                   paste0("-", huge))
+
+  # big_integers = "double" is lossy by design, but it must still yield the
+  # value: anything of 32 digits or more used to come back as Inf.
+  expect_equal(yaml_parse(strrep("9", 31), big_integers = "double"), 1e31,
+               tolerance = 1e-12)
+  expect_equal(yaml_parse(strrep("9", 32), big_integers = "double"), 1e32,
+               tolerance = 1e-12)
+  expect_equal(yaml_parse(paste0("-", huge), big_integers = "double"), -1e40,
+               tolerance = 1e-12)
+})
+
+test_that("the 64-bit boundary values parse exactly", {
+  # -9223372036854775808 is INT64_MIN. Negating it in int64_t overflows, which
+  # is undefined behaviour rather than merely implementation-defined; UBSan
+  # reports it and CRAN runs UBSan builds. See tools/patches/README.md, patch
+  # 0004. The value was right on the compilers tried, so only a sanitizer
+  # distinguishes the fixed code from the broken code -- which is exactly why
+  # this needs pinning by value here *and* exercising under the sanitizer in
+  # tools/sanitizer-exercise.R.
+  boundaries <- c(
+    "9223372036854775807",   # INT64_MAX
+    "-9223372036854775808",  # INT64_MIN
+    "-9223372036854775807",  # INT64_MIN + 1
+    "9223372036854775808",   # INT64_MAX + 1, past int64 but inside uint64
+    "-9223372036854775809",  # INT64_MIN - 1, past int64 on the low side
+    "18446744073709551615"   # UINT64_MAX
+  )
+
+  for (v in boundaries) {
+    expect_identical(as.character(yaml_parse(v)), v, info = v)
+  }
+
+  # And the sign is not lost on the way to a double.
+  expect_equal(yaml_parse("-9223372036854775808", big_integers = "double"),
+               -9223372036854775808, tolerance = 1e-12)
+})

@@ -47,14 +47,20 @@
 #' @param max_depth Maximum nesting depth, or `0` for unlimited.
 #' @param max_size Maximum input size in bytes, or `0` for unlimited.
 #' @param path Optional file path, used only to make error messages more
-#'   informative. Set by the file-reading functions in a later milestone.
+#'   informative. [yaml_read()] and its companions set it for you.
 #'
 #' @return `yaml_parse()` returns an R object. `yaml_parse_all()` returns a
 #'   list with one element per document.
 #'
 #' @examples
-#' yaml_parse("null")
-#' yaml_parse_all("---\nnull\n---\nnull\n")
+#' yaml_parse("host: localhost\nport: 8080\ntls: true\n")
+#'
+#' # The core schema, not YAML 1.1: `yes` is a string, and a quoted number
+#' # stays a string.
+#' str(yaml_parse("answer: yes\nversion: \"42\"\n"))
+#'
+#' # A stream is not a sequence: one element per document.
+#' yaml_parse_all("---\nfirst\n---\nsecond\n")
 #' @name yaml_parse
 NULL
 

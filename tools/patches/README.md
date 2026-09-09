@@ -100,3 +100,36 @@ would have surfaced there.
 
 **Worth reporting upstream:** it is a real defect independent of zuyaml, and
 reachable from any caller that appends an empty string.
+
+## 0004-str-to-i64-int64-min.patch
+
+**Why it is required:** `cyaml_str_to_i64()` negates the parsed magnitude with
+
+```c
+*out = -(int64_t)uval;
+```
+
+For `INT64_MIN` the magnitude is `(uint64_t)INT64_MAX + 1`, which the bound
+check above deliberately admits. Converting it to `int64_t` yields `INT64_MIN`,
+and negating `INT64_MIN` overflows — signed overflow, which is undefined
+behaviour, not merely implementation-defined.
+
+Parsing the ordinary literal `-9223372036854775808` is enough to reach it.
+
+**What it does:** returns `INT64_MIN` directly for that one magnitude, leaving
+every other value on the original path, where the negation is in range.
+
+**How it was found:** UndefinedBehaviorSanitizer:
+
+```
+cyaml_utf8.c:1049: runtime error: negation of -9223372036854775808 cannot be
+                   represented in type 'int64_t'
+```
+
+The value produced was correct on the compilers tried, so nothing else caught
+it — not the test suite, not the fuzzer. `tools/sanitizer-exercise.R` did not
+reach it either, which is why the sanitizer CI job stayed green; it now parses
+the 64-bit boundary values explicitly.
+
+**Worth reporting upstream:** it is a real defect independent of zuyaml, in a
+function any caller reaches through `cyaml_as_int()`.

@@ -261,33 +261,62 @@ static SEXP scalar_int(const cyaml_doc_t* doc, const cyaml_node_t* node,
     {
         const char* raw = cyaml_str(doc, node);
         uint32_t raw_n = cyaml_len(node);
-        SEXP txt, out;
-        uint32_t k = (raw_n > 0 && (raw[0] == '+' || raw[0] == '-')) ? 1 : 0;
+        uint32_t k, z;
+        bool neg;
+        size_t norm_n;
+        char* norm;
 
-        if (raw == NULL || raw_n == 0 || k >= raw_n
-            || !all_digits(raw + k, (size_t)(raw_n - k))) {
+        if (raw == NULL || raw_n == 0) {
             return scalar_string(doc, node);
         }
-        if (raw_n >= sizeof(digits)) {
-            /* Too long for the stack buffer: build it as an R string. */
-            txt = PROTECT(Rf_mkCharLenCE(raw, (int)raw_n, CE_UTF8));
-            out = PROTECT(big_integer(ctx, CHAR(txt), R_PosInf));
-            UNPROTECT(2);
-            return out;
+        neg = (raw[0] == '-');
+        k = (neg || raw[0] == '+') ? 1u : 0u;
+        if (k >= raw_n || !all_digits(raw + k, (size_t)(raw_n - k))) {
+            return scalar_string(doc, node);
         }
-        memcpy(digits, raw, raw_n);
-        digits[raw_n] = '\0';
-        return big_integer(ctx, digits, atof(digits));
+
+        /* Normalise to the decimal form mk_bigint promises: no leading '+',
+           no leading zeros, so that +007 and 7 give identical values. The
+           text is copied rather than used in place, both because the span is
+           not NUL-terminated and because the sign may have to be dropped. */
+        z = k;
+        while (z + 1u < raw_n && raw[z] == '0') {
+            z++;
+        }
+        norm_n = (size_t)(raw_n - z) + (neg ? 1u : 0u);
+        norm = (norm_n < sizeof(digits))
+            ? digits
+            : (char*)R_alloc(norm_n + 1u, 1); /* freed when .Call returns */
+        if (neg) {
+            norm[0] = '-';
+        }
+        memcpy(norm + (neg ? 1u : 0u), raw + z, (size_t)(raw_n - z));
+        norm[norm_n] = '\0';
+
+        /* The approximation has to come from the text: the value is beyond
+           every integer type here, so there is nothing else to convert. */
+        return big_integer(ctx, norm, atof(norm));
     }
 }
 
+/*
+ * Text that does not conform to the tag falls back to a string.
+ *
+ * Both of these are reachable two ways: from schema resolution, where cyaml
+ * has already decided the text is a float or a boolean and the conversion
+ * cannot fail, and from an explicit `!!float` / `!!bool` tag on arbitrary
+ * text, where it can. An unresolvable scalar is a string in YAML, and the
+ * `!!int` path takes the same way out, so `!!float abc` is "abc" rather than
+ * an error -- erroring would reject documents that parsed before tags were
+ * honoured at all.
+ */
 static SEXP scalar_double(const cyaml_doc_t* doc, const cyaml_node_t* node)
 {
     double v;
 
     /* Handles .inf, -.inf and .nan. */
     if (!cyaml_as_float(doc, node, &v)) {
-        zuyaml_stopf("syntax", NULL, "Could not parse YAML float scalar.");
+        return scalar_string(doc, node);
     }
     return Rf_ScalarReal(v);
 }
@@ -297,7 +326,7 @@ static SEXP scalar_bool(const cyaml_doc_t* doc, const cyaml_node_t* node)
     bool v;
 
     if (!cyaml_as_bool(doc, node, &v)) {
-        zuyaml_stopf("syntax", NULL, "Could not parse YAML boolean scalar.");
+        return scalar_string(doc, node);
     }
     return Rf_ScalarLogical(v ? TRUE : FALSE);
 }
@@ -309,8 +338,12 @@ static SEXP scalar_bool(const cyaml_doc_t* doc, const cyaml_node_t* node)
  * integer 12, and the non-specific tag `!` forces string resolution too.
  * Without this, tagged scalars were resolved as though untagged.
  *
- * Tags are compared in both spellings cyaml may hand back: the shorthand
- * (`!!str`) and the fully resolved form (`tag:yaml.org,2002:str`).
+ * A tag reaches us as the raw source span of the tag token, so it may be a
+ * shorthand (`!!str`, `!e!str`, `!local`), a verbatim tag
+ * (`!<tag:yaml.org,2002:str>`) or the non-specific `!`. Everything but the
+ * last is expanded against the document's %TAG directives before it is
+ * compared, so all the spellings of a core tag are recognised and a handle
+ * bound to some other prefix is not.
  */
 typedef enum {
     ZUYAML_TAG_NONE = 0,
@@ -323,81 +356,143 @@ typedef enum {
     ZUYAML_TAG_UNKNOWN /* an application tag */
 } zuyaml_tag_t;
 
-static bool tag_is(const char* s, size_t n, const char* shorthand,
-    const char* resolved)
-{
-    size_t sn = strlen(shorthand), rn = strlen(resolved);
-
-    if (n == sn && memcmp(s, shorthand, sn) == 0) {
-        return true;
-    }
-    return n == rn && memcmp(s, resolved, rn) == 0;
-}
+#define ZUYAML_CORE_PREFIX "tag:yaml.org,2002:"
+#define ZUYAML_CORE_PREFIX_N (sizeof(ZUYAML_CORE_PREFIX) - 1)
 
 /*
- * Has a %TAG directive redefined this shorthand handle?
+ * The prefix a %TAG directive binds to this handle, or the YAML default.
  *
- * `%TAG !! tag:example.com,2000:app/` makes `!!int` an application tag, not
- * the core integer tag. cyaml records directives on the document but hands
- * back the tag text unexpanded, so the handle has to be checked before a
- * shorthand can be trusted to mean what it usually means.
+ * `%TAG !! tag:example.com,2000:app/` makes `!!int` an application tag; the
+ * equally legal `%TAG !! tag:yaml.org,2002:` restates the default and changes
+ * nothing, so the prefix has to be compared, not merely the handle. A named
+ * handle with no directive is undefined, and reported as such by returning
+ * false.
  */
-static bool handle_is_redefined(const cyaml_doc_t* doc, const char* handle,
-    size_t handle_n)
+static bool handle_prefix(const cyaml_doc_t* doc, const char* handle,
+    size_t handle_n, const char** prefix, size_t* prefix_n)
 {
     uint8_t i;
 
-    if (doc == NULL) {
-        return false;
-    }
-    for (i = 0; i < doc->tag_count; i++) {
-        const cyaml_span_t* h = &doc->tags[i].handle;
-        const char* text = cyaml_span_ptr(doc, *h);
+    if (doc != NULL) {
+        for (i = 0; i < doc->tag_count; i++) {
+            const cyaml_span_t* h = &doc->tags[i].handle;
+            const char* text = cyaml_span_ptr(doc, *h);
 
-        if (text != NULL && h->len == handle_n
-            && memcmp(text, handle, handle_n) == 0) {
-            return true;
+            if (text != NULL && (size_t)h->len == handle_n
+                && memcmp(text, handle, handle_n) == 0) {
+                *prefix = cyaml_span_ptr(doc, doc->tags[i].prefix);
+                *prefix_n = (size_t)doc->tags[i].prefix.len;
+                return *prefix != NULL;
+            }
         }
     }
+    if (handle_n == 1 && handle[0] == '!') {
+        *prefix = "!"; /* the primary handle names a local tag */
+        *prefix_n = 1;
+        return true;
+    }
+    if (handle_n == 2 && handle[0] == '!' && handle[1] == '!') {
+        *prefix = ZUYAML_CORE_PREFIX;
+        *prefix_n = ZUYAML_CORE_PREFIX_N;
+        return true;
+    }
     return false;
+}
+
+/*
+ * Expand a tag into its full form, writing it into `buf`.
+ *
+ * Returns false when there is no full form -- an undefined handle, or a tag
+ * longer than the buffer, both of which the caller treats as an application
+ * tag, which is what they are as far as the core schema is concerned.
+ */
+static bool resolve_tag(const cyaml_doc_t* doc, const char* s, size_t n,
+    char* buf, size_t buf_n)
+{
+    const char *handle, *suffix, *prefix;
+    size_t handle_n, suffix_n, prefix_n, j;
+
+    if (n < 1 || s[0] != '!') {
+        return false;
+    }
+    if (n >= 3 && s[1] == '<' && s[n - 1] == '>') {
+        /* Verbatim: `!<tag:yaml.org,2002:str>` is already the full form. */
+        suffix_n = n - 3;
+        if (suffix_n >= buf_n) {
+            return false;
+        }
+        memcpy(buf, s + 2, suffix_n);
+        buf[suffix_n] = '\0';
+        return true;
+    }
+
+    /* Shorthand: the handle is `!`, `!!`, or `!name!`. */
+    for (j = 1; j < n && s[j] != '!'; j++) {
+        if (!((s[j] >= '0' && s[j] <= '9') || (s[j] >= 'A' && s[j] <= 'Z')
+                || (s[j] >= 'a' && s[j] <= 'z') || s[j] == '-')) {
+            break; /* not a handle character, so the handle is just `!` */
+        }
+    }
+    handle = s;
+    if (j < n && s[j] == '!') {
+        handle_n = j + 1;
+    } else {
+        handle_n = 1;
+    }
+    suffix = s + handle_n;
+    suffix_n = n - handle_n;
+
+    if (!handle_prefix(doc, handle, handle_n, &prefix, &prefix_n)) {
+        return false;
+    }
+    if (prefix_n + suffix_n >= buf_n) {
+        return false;
+    }
+    memcpy(buf, prefix, prefix_n);
+    memcpy(buf + prefix_n, suffix, suffix_n);
+    buf[prefix_n + suffix_n] = '\0';
+    return true;
 }
 
 static zuyaml_tag_t classify_tag(const cyaml_doc_t* doc, const char* s,
     size_t n)
 {
+    char buf[512];
+    const char* suffix;
+
     if (s == NULL || n == 0) {
         return ZUYAML_TAG_NONE;
     }
-    /* A redefined handle means the shorthand no longer names a core tag. */
-    if (n >= 2 && s[0] == '!' && s[1] == '!'
-        && handle_is_redefined(doc, "!!", 2)) {
-        return ZUYAML_TAG_UNKNOWN;
-    }
-    if (n >= 1 && s[0] == '!' && !(n >= 2 && s[1] == '!')
-        && handle_is_redefined(doc, "!", 1)) {
-        return ZUYAML_TAG_UNKNOWN;
-    }
-    /* The non-specific tag `!` means "resolve as a string". */
+    /* The non-specific tag `!` means "resolve as a string". It is a distinct
+       production from the primary tag handle, so a `%TAG !` directive does
+       not apply to it and this check comes first. */
     if (n == 1 && s[0] == '!') {
         return ZUYAML_TAG_STR;
     }
-    if (tag_is(s, n, "!!str", "tag:yaml.org,2002:str")) {
+    if (!resolve_tag(doc, s, n, buf, sizeof(buf))) {
+        return ZUYAML_TAG_UNKNOWN;
+    }
+    if (strncmp(buf, ZUYAML_CORE_PREFIX, ZUYAML_CORE_PREFIX_N) != 0) {
+        return ZUYAML_TAG_UNKNOWN;
+    }
+
+    suffix = buf + ZUYAML_CORE_PREFIX_N;
+    if (strcmp(suffix, "str") == 0) {
         return ZUYAML_TAG_STR;
     }
-    if (tag_is(s, n, "!!int", "tag:yaml.org,2002:int")) {
+    if (strcmp(suffix, "int") == 0) {
         return ZUYAML_TAG_INT;
     }
-    if (tag_is(s, n, "!!float", "tag:yaml.org,2002:float")) {
+    if (strcmp(suffix, "float") == 0) {
         return ZUYAML_TAG_FLOAT;
     }
-    if (tag_is(s, n, "!!bool", "tag:yaml.org,2002:bool")) {
+    if (strcmp(suffix, "bool") == 0) {
         return ZUYAML_TAG_BOOL;
     }
-    if (tag_is(s, n, "!!null", "tag:yaml.org,2002:null")) {
+    if (strcmp(suffix, "null") == 0) {
         return ZUYAML_TAG_NULL;
     }
-    if (tag_is(s, n, "!!seq", "tag:yaml.org,2002:seq")
-        || tag_is(s, n, "!!map", "tag:yaml.org,2002:map")) {
+    if (strcmp(suffix, "seq") == 0 || strcmp(suffix, "map") == 0) {
         return ZUYAML_TAG_COLLECTION;
     }
     return ZUYAML_TAG_UNKNOWN;
@@ -429,9 +524,11 @@ static void check_unknown_tag(zuyaml_ctx_t* ctx, const cyaml_node_t* node,
         return;
     }
     {
-        /* A document root's own span is zeroed, so fall back to the tag's. */
-        const cyaml_span_t* at = node->span.start_line ? &node->span
-                                                       : &node->tag;
+        /* Point at the tag the message names, not at the value it decorates.
+           A tag reaching here always has a span, but fall back to the node's
+           in case it ever does not. */
+        const cyaml_span_t* at = node->tag.start_line ? &node->tag
+                                                      : &node->span;
         zuyaml_stopf("unsupported_tag", NULL,
             "Unsupported YAML tag '%.*s' at line %u, column %u.",
             (int)tag_n, tag, (unsigned)at->start_line,
@@ -629,10 +726,28 @@ static const cyaml_node_t* follow_alias(const cyaml_node_t* n)
     return n;
 }
 
-/* Text of a mapping key, as a CHARSXP. Callers ensure the key is a scalar. */
-static SEXP key_charsxp(const cyaml_doc_t* doc, const cyaml_node_t* key)
+/*
+ * Text of a mapping key, as a CHARSXP. Callers ensure the key is a scalar.
+ *
+ * A key is stringified rather than converted, so it never passes through
+ * convert_scalar() and the tags policy has to be applied here: a caller who
+ * asked for tags = "error" wants to hear about `!duration 5m: v` just as much
+ * as about the same tag on the value side.
+ */
+static SEXP key_charsxp(const cyaml_doc_t* doc, const cyaml_node_t* key,
+    zuyaml_ctx_t* ctx)
 {
-    return scalar_charsxp(doc, follow_alias(key));
+    const cyaml_node_t* k = follow_alias(key);
+    uint32_t tag_n = 0;
+    const char* tag;
+
+    if (k != NULL) {
+        tag = node_tag(doc, k, &tag_n);
+        if (classify_tag(doc, tag, (size_t)tag_n) == ZUYAML_TAG_UNKNOWN) {
+            check_unknown_tag(ctx, k, tag, tag_n);
+        }
+    }
+    return scalar_charsxp(doc, k);
 }
 
 /*
@@ -760,7 +875,7 @@ static SEXP convert_map(const cyaml_doc_t* doc, const cyaml_node_t* node,
     for (i = 0; i < n; i++) {
         cyaml_pair_t* pair = cyaml_map_at(node, i);
 
-        SET_STRING_ELT(names, (R_xlen_t)i, key_charsxp(doc, pair->key));
+        SET_STRING_ELT(names, (R_xlen_t)i, key_charsxp(doc, pair->key, ctx));
         SET_VECTOR_ELT(out, (R_xlen_t)i,
             zuyaml_convert_node(doc, pair->val, ctx, &frame));
     }
@@ -858,8 +973,14 @@ SEXP zuyaml_convert_node(const cyaml_doc_t* doc, const cyaml_node_t* node,
         const char* tag = node_tag(doc, node, &tag_n);
 
         switch (classify_tag(doc, tag, (size_t)tag_n)) {
-        case ZUYAML_TAG_STR:
-            return Rf_ScalarString(Rf_mkCharLenCE("", 0, CE_UTF8));
+        case ZUYAML_TAG_STR: {
+            /* Rf_ScalarString() allocates, so the CHARSXP needs an owner on
+               the protect stack first. */
+            SEXP ch = PROTECT(Rf_mkCharLenCE("", 0, CE_UTF8));
+            SEXP out = Rf_ScalarString(ch);
+            UNPROTECT(1);
+            return out;
+        }
         case ZUYAML_TAG_UNKNOWN:
             check_unknown_tag(ctx, node, tag, tag_n);
             break;
