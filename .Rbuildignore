@@ -3,6 +3,7 @@
 ^\.github$
 ^LICENSE\.md$
 ^\.agents$
+^\.covrignore$
 ^doc$
 ^Meta$
 ^cran-comments\.md$

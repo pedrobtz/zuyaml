@@ -1,0 +1,7 @@
+# Vendored third-party code: the cyaml library, carried verbatim from upstream
+# apart from the patches in tools/patches. Its json, path, events and modify
+# modules implement features zuyaml never calls and cannot be dropped from the
+# tarball, so measuring them reports upstream's coverage rather than this
+# package's. The glob is deliberate: a re-vendor that adds a translation unit
+# is excluded without anyone remembering to edit this file.
+src/cyaml*.c
