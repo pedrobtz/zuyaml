@@ -1,9 +1,8 @@
 # Temporary: exercise pedrobtz/r-actions#4 before it is merged.
 #
 # A `workflow_call` workflow only runs when something calls it, so opening
-# that PR proves nothing on its own. This calls the three changed workflows
-# from the PR branch against a real package with vendored C, which is the
-# only way to find out whether they work.
+# that PR proves nothing on its own. This calls the changed workflows from
+# the PR branch against a real package with vendored C.
 #
 # Delete this file once the PR is merged or closed.
 
@@ -17,22 +16,26 @@ name: validate-r-actions
 permissions: read-all
 
 jobs:
-  # The interesting one. `run` replaces R CMD check with the package's own
-  # base-R driver, which is why zuyaml can use these containers at all:
-  # testthat is not in the r-hub binary repository and building it and its
-  # dependencies from source under ASan is slow and fragile.
-  asan:
-    uses: pedrobtz/r-actions/.github/workflows/asan.yml@asan-and-failing-checks
+  # UBSan on the runner plus ASan in the containers, from one `uses:`. The
+  # asan-run input replaces R CMD check with the package's own base-R driver,
+  # which is why zuyaml can use these containers at all: testthat is not in
+  # the r-hub binary repository and building it and its dependencies from
+  # source under ASan is slow and fragile.
+  sanitizers:
+    uses: pedrobtz/r-actions/.github/workflows/sanitizers.yml@asan-and-failing-checks
     with:
-      dependencies: false
-      run: Rscript tools/sanitizer-exercise.R tests/testthat/fixtures/yaml-test-suite
+      asan: true
+      asan-dependencies: false
+      asan-run: Rscript tools/sanitizer-exercise.R tests/testthat/fixtures/yaml-test-suite
 
-  # Same containers, with the default R CMD check path, to find out what that
-  # costs in practice on a package with five Suggests.
-  asan-default-check:
-    uses: pedrobtz/r-actions/.github/workflows/asan.yml@asan-and-failing-checks
+  # The same containers on the default R CMD check path, which failed on the
+  # first validation run because Suggests were not installed. This is the
+  # regression test for that fix, and it measures what the path costs.
+  sanitizers-default-check:
+    uses: pedrobtz/r-actions/.github/workflows/sanitizers.yml@asan-and-failing-checks
     with:
-      containers: '["clang-asan"]'
+      asan: true
+      asan-containers: '["clang-asan"]'
       timeout-minutes: 90
 
   valgrind:
@@ -40,8 +43,9 @@ jobs:
     with:
       timeout-minutes: 90
 
-  # zuyaml is at zero rchk findings after fixing the one it found, so the
-  # opt-in is the whole point for this package.
+  # zuyaml is at zero rchk findings, so the opt-in is the point for this
+  # package. It failed on the first run against R's own bcEval_loop; this is
+  # the regression test for the corrected pattern.
   rchk:
     uses: pedrobtz/r-actions/.github/workflows/rchk.yml@asan-and-failing-checks
     with:
