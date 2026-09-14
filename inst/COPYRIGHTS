@@ -52,6 +52,15 @@ Bundled third-party code: cyaml
       UndefinedBehaviorSanitizer reports it on the ordinary literal
       -9223372036854775808.
 
+    - src/cyaml.c: cyaml_scalar_str() returns the span verbatim for a
+      document that was built rather than parsed. The processing it
+      otherwise applies -- folding line breaks into spaces, dropping
+      whitespace before a break, decoding quote and escape sequences --
+      reads the span as YAML source, which is right for a parsed document
+      and wrong for a built one, where the span is the literal string the
+      caller supplied. Without this, any string containing a line break
+      was corrupted on emit.
+
   No other upstream source file is modified. Upstream files are otherwise
   bundled verbatim.
 

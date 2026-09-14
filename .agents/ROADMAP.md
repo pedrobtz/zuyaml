@@ -30,10 +30,11 @@ Anything that cannot be committed to at that level is deferred past 1.0 — see
 
 ## Current state
 
-**M0–M6 complete.** Parsing, emission, files, conformance, fuzzing and
-benchmarks are done and on `develop`. `R CMD check --as-cran` is clean at one
-NOTE (new submission); 2517 tests pass; R-CMD-check is green on macOS, Windows
-and Ubuntu (release, devel, oldrel-1, clang).
+**M0–M6.6 complete** (2026-09-14). Parsing, emission, files, conformance,
+fuzzing, benchmarks, the two round-trip defects and the harness that should
+have caught them. `R CMD check --as-cran` is clean at one NOTE (new
+submission); 2,972 assertions pass; R-CMD-check is green on macOS, Windows and
+Ubuntu (release, devel, oldrel-1, clang); ASan and UBSan are clean.
 
 What the milestones actually turned up, none of it predictable from the header:
 
@@ -44,6 +45,10 @@ What the milestones actually turned up, none of it predictable from the header:
 | `cyaml_new_float()` formats with `%g` — six significant digits | zuyaml formats doubles itself |
 | The emitter quotes plain `true`/`false`/`null`/`~`, so booleans emit as strings | Second vendored patch (`0002`) |
 | The emitter never quotes numeric-looking strings | `resolves_as_non_string()` in the emit path |
+| The emitter never quotes for *whitespace* either, and `cyaml_map_set()` leaves key nodes plain | `needs_nonplain_style()`, applied to values **and** keys (M6.5) |
+| `cyaml_scalar_str()` re-reads a **built** node's span as YAML source, folding line breaks | Fifth vendored patch (`0005`) — no caller-side style choice can prevent it (M6.5) |
+| The parser treats a literal NUL as end of input, and leaves a leading BOM in the first scalar | Input scanned and the BOM skipped before parsing (M6.5) |
+| `cyaml_str_to_f64()` treats `strtod`'s `ERANGE` as failure, so overflow, underflow **and subnormals** were refused | `out_of_range_double()` converts to the nearest double, aligning with `zujson` (M6.5) |
 
 Conformance: **333/333** agreement with the yaml-test-suite on valid-versus-
 invalid, no crashes, no bare R errors escaping from C.
@@ -52,9 +57,23 @@ Benchmarks: parsing runs at **0.6–0.9×** the `yaml` package, emission at
 **1.5–4×**, installed size 399 KB against 645 KB. R allocation dominates, not
 parsing. No performance claim belongs in user-facing text.
 
-Remaining: **M6.5** and **M7**. M6.5 is new and blocking — see the
-comparative review below, which found two silent-data-loss defects that the
-conformance and fuzz work did not.
+Conformance now: **402/402** on valid-versus-invalid, **278/279** against the
+suite's own `in.json` (the one difference is `WZ62` and deliberate), and
+**280/280** on emit → parse identity, which was 210/280 before M6.5.
+
+Remaining: **M7**, and it is mostly decisions rather than code — the three API
+questions in design §22, a `conditionCall()`, and a release.
+
+**What M6.5 taught, and it is the more useful half of it.** The roadmap's own
+diagnosis of the emitter defect was wrong about the cause: it blamed the style
+rule, and marking those strings `CYAML_DOUBLE` fixes edge whitespace but does
+nothing for line breaks, which were 66 of the 70 failing documents. The folding
+happens inside `cyaml_scalar_str()`, before the emitter consults any style.
+Writing the fix from the same reading of the code that produced the bug
+reproduced the bug's blind spot; running the property found it in one command.
+The property tests then found three further defects of the same family that the
+`yaml12` review had not reached — integral doubles, mapping keys, and the lone
+`-` and `?` — one of which produced YAML that does not parse at all.
 
 ---
 
@@ -129,9 +148,9 @@ key name. Both are wrong per spec.
 | M3 ✅ | Hard cases | 0.2.0 | L | No silent semantic loss |
 | M4 ✅ | Emitter | 0.3.0 | L | Round trips hold, including numeric strings |
 | M5 ✅ | Files and integration | 0.4.0 | S | Usable as a dependency |
-| M6 ◐ | Conformance and hardening | 0.5.0 | L | Demonstrably robust |
-| M6.5 | Byte and round-trip correctness | 0.2.0 | M | No silent loss on emit or on NUL |
-| M6.6 | Conformance harness | 0.2.0 | S | The corpus asserts round-trip identity |
+| M6 ✅ | Conformance and hardening | 0.5.0 | L | Demonstrably robust |
+| M6.5 ✅ | Byte and round-trip correctness | 0.1.0 | M | No silent loss on emit or on NUL |
+| M6.6 ✅ | Conformance harness | 0.1.0 | S | The corpus asserts round-trip identity |
 | M7 | Freeze and release | → 1.0.0 | M | CRAN-accepted, API committed |
 | M8 | Tag interoperation | 1.1.0 | M | Tags survive a round trip; hooks exist |
 | M9 | Key and style fidelity | 1.2.0 | L | `zuyaml_map` emits; block styles chosen |
@@ -340,7 +359,19 @@ files and raw bodies without reaching into internals.
 - ❌ **Clean ASan/UBSan across the test suite and fuzz corpus.** Not yet
   demonstrated. The sanitizer jobs failed on their first line for two runs
   (`set -o pipefail` is not available in the containers' `sh`), so they had
-  never executed a single test. Fixed; awaiting a green run.
+  never executed a single test. Fixed on 2026-09-08, and green on **every**
+  `hardening.yaml` run since — all three containers, with the package compiled
+  `-fsanitize=address,undefined`. This entry said otherwise until 2026-09-14,
+  because it was written from the failures and never rechecked against the run
+  list; that is the mistake to avoid repeating, not the sanitizer setup.
+
+  A local `-fsanitize=address,undefined` build was also run clean on
+  2026-09-14 over the full corpus and the whole suite. Two traps had to be
+  cleared first and the first attempt fell into both: stale `.o` files meant
+  the build was not actually instrumented, and macOS strips `DYLD_*` through
+  the `R` wrapper so the interceptors were not installed. STATUS records how
+  to check for each; the `nm` check is now in the r-actions `asan.yml`
+  proposal.
 - ✅ No leaks on repeated failure paths — as far as a plain R heap check can
   show. The real evidence is the ASan run above, so this is provisional.
 - ✅ Benchmark numbers recorded; no performance claim is made anywhere.
@@ -351,20 +382,31 @@ files and raw bodies without reaching into internals.
   scalars, empty block scalars returning `NULL`, and an alias used as a mapping
   key collapsing the whole mapping into a `zuyaml_map`.
 
-  Agreement is now **977 of 990**. Not compared: multi-document cases, whose
-  `in.json` concatenates one value per document and needs an incremental parser
-  to split, and number typing and key order, which JSON cannot represent. One
-  known difference remains: collection-valued keys, where JSON flattens what
-  `zuyaml_map` preserves.
+  Agreement is now **278 of 279** case identifiers, multi-document cases
+  included: their `in.json` concatenates one value per document, and splitting
+  it needs no parser of our own, only accumulating lines and retrying (M6.6).
+  Number typing and key order are still normalised away, because JSON cannot
+  represent either. One known difference remains: collection-valued keys, where
+  JSON flattens what `zuyaml_map` preserves.
+
+  (The earlier "of 990" counts were inflated: a suite checkout re-exposes every
+  case under `name/` and `tags/` as symlink trees, and `list.files(recursive =
+  TRUE)` follows them. The helpers now filter both, so the counts match the
+  suite's own 402.)
 
 ---
 
-## M6.5 — Byte and round-trip correctness
+## M6.5 — Byte and round-trip correctness ✅
 
-**Version 0.2.0. Blocking 1.0.** Two silent-data-loss defects, found by
-differential testing against `yaml12` rather than by the conformance suite or
-the fuzzer. Both contradict the package's central claim, so neither can be
-carried into a stability promise.
+**Done 2026-09-14, in 0.1.0** (0.1.0 was never released, so the fixes land in
+it rather than in a 0.2.0). Two silent-data-loss defects, found by differential
+testing against `yaml12` rather than by the conformance suite or the fuzzer.
+Both contradicted the package's central claim, so neither could be carried into
+a stability promise.
+
+**Read the correction at the end of this section before trusting the analysis
+below.** The account of item 1's *cause* is wrong, and the fix as specified
+would have left two thirds of the failures in place.
 
 ### 1. The emitter destroys strings containing newlines or edge whitespace
 
@@ -445,9 +487,69 @@ start of a stream and must not reach the document.
 **Exit:** a BOM-prefixed document parses identically to the same document
 without one.
 
+### Correction, written after doing it
+
+**The cause of item 1 was one level deeper than this section says.** Setting
+`CYAML_DOUBLE` fixes leading and trailing whitespace. It does **nothing** for
+line breaks, which were 66 of the 70 failing documents, because
+`cyaml_scalar_str()` re-reads a node's span as YAML *source* — folding breaks
+into spaces — and the emitter calls it *before* consulting the style. The break
+is gone before any caller-side rule can see it. The fix needed a fifth vendored
+patch, `0005-scalar-str-built-verbatim`, returning the span verbatim when
+`doc->mode == CYAML_BUILDING`. Both halves are required and they close
+different parts of the defect.
+
+The lesson is not about cyaml. This section was written from the same reading
+of the code that produced the bug, so it inherited the blind spot. Running the
+property took one command and settled it.
+
+**Three more defects, none of them in this section**, all found by the M6.6
+property tests:
+
+| Defect | Effect |
+|---|---|
+| A whole-numbered double emits as `450` (`%g`), which resolves as an **integer** | every integral double changes type on a round trip; the suite's own `UGM3` has `price: 450.00` |
+| Mapping **keys** are never style-checked — `cyaml_map_set()` builds the key node itself | `list("  x  " = 1)` came back as `list(x = 1)`; a key spelled `null` became an unemittable `zuyaml_map` |
+| A scalar that is exactly `-` or `?` emits unquoted | `k: ?` **does not parse** — the emitter produced an invalid document |
+
+And one documented behaviour that was not being honoured: `NULL` and `NA`
+emitted as `x:` rather than `x: null`.
+
+**A fifth, from aligning with `zujson`.** Its testing article states the rule as
+*generous about numbers, strict about text*: a number outside what a double can
+hold has a well-defined nearest value, so convert it. zuyaml did not — a float
+that overflowed, underflowed, or landed in the subnormal range came back as a
+**character string**, because `cyaml_str_to_f64()` treats `strtod`'s `ERANGE`
+as failure. `timeout: 1e308` gave a double and `timeout: 1e309` gave a string:
+the R type of a field depended on the magnitude of its value. Now converted to
+the nearest double, `1e-323` included, which was representable all along.
+
+The two packages stay different on integers beyond 2^53 — `zuyaml_bigint` here,
+nearest double there — and that is the medium, not an oversight: config files
+get diffed, HTTP bodies do not. `big_integers = "double"` opts into the other
+answer.
+
+The same article supplies a testing practice worth copying outright: **never
+write a double as an R source literal**. R's reader is not correctly rounded on
+`aarch64` — it reads `DBL_MAX` written out in full as `Inf` — so expectations
+are IEEE-754 bit patterns through `readBin()`. The first draft of these tests
+was written the obvious way and failed against a reference that was itself
+wrong.
+
+**What actually shipped**, beyond what is specified above:
+
+- `needs_nonplain_style()` alongside `resolves_as_non_string()` — two questions,
+  "would this come back as another type?" and "would this come back at all?";
+- the same rule applied to keys, deliberately not a narrower one;
+- `.0` appended to any double whose formatted text has neither `.` nor exponent;
+- an explicit `null` scalar instead of cyaml's empty node;
+- `out_of_range_double()`, so an out-of-range float is a number rather than a
+  string;
+- vendored patch `0005`.
+
 ---
 
-## M6.6 — Conformance harness
+## M6.6 — Conformance harness ✅
 
 **Version 0.2.0, with M6.5.** M6.5 is the defect; this is the reason it
 survived. The corpus was already in the repository and already being iterated
@@ -550,9 +652,41 @@ listed with a reason in the same style as `expected_mismatch`; multi-document
 cases are compared; error paths assert health after repetition and under
 `gctorture`; `tools/conformance.R` runs against a full checkout and reports.
 
+### What shipped, 2026-09-14
+
+All of the above, plus one thing this section did not anticipate.
+
+| Item | Where |
+|---|---|
+| Emit → parse identity for every case that emits | `test-conformance.R`, 280/280 |
+| Multi-document semantic comparison | `test-conformance-semantic.R`; 279/279 cases with a reference now compared, where 23 were skipped |
+| Full-checkout report with a pinned baseline | `tools/conformance.R`, wired into `hardening.yaml` |
+| Eight poisoning loops, `gctorture`, format specifiers, `R_forceSymbols` | `test-unwind-safety.R` |
+| **Property tests over generated and exhaustive short strings** | `test-round-trip.R` |
+
+That last row is the addition. The suite round trip is necessary and was not
+sufficient: it found the integral-double defect, but the suite contains no
+one-character scalar and no key with edge whitespace, so it could not have
+found the other two. Generated strings in five positions found the key defect;
+every one- and two-character string over the indicator alphabet — 703 cases,
+under a second — found `k: ?`.
+
+A correctness rule needs a property, not a corpus and not a list. The corpus
+tells you about documents people wrote; the property tells you about documents
+the code can produce.
+
+**A second note for the risk register.** `pkgload::load_all()` leaves `-O0`
+objects in `src/`, and `R CMD INSTALL .` reuses any `.o` newer than its `.c`.
+A before-and-after benchmark run that way showed a 3× parse regression that did
+not exist. Delete `src/*.o` before benchmarking an in-place build.
+
 **Note for the risk register.** Differential testing against `yaml12` found in
 minutes what 2,517 tests, 15,000 fuzz iterations and a 402-case corpus did not.
-The corpus was never the weak part — the assertions over it were.
+The corpus was never the weak part — the assertions over it were. And the
+property tests that replaced them then found three defects the differential run
+had *also* missed, one of which produced YAML that does not parse. Differential
+testing tells you where you disagree with someone else; a property tells you
+where you disagree with yourself.
 
 ---
 
@@ -717,7 +851,10 @@ code from M2 and M4:
 | Windows toolchain and C11 | Low | Medium | Caught at M1, before anything is built on top |
 | R conversion dominates parse time | Medium | Low | Zero-copy plain-scalar path from M2; measured at M6 |
 | `zuyaml_map` / duplicate keys don't round-trip | Certain | Low | Documented asymmetry (design §8); reconsider at M7 whether they belong in 1.0; scheduled at M9 |
-| **Hand-enumerated test corpora hide whole categories** | Certain | High | The emitter gap survived 2517 tests, 15,000 fuzz iterations and a 402-case suite because every corpus was written from the same list of cases the code was written from. M6.5's exit requires property-based round-trip tests; prefer differential testing against another implementation over extending a list |
+| **Hand-enumerated test corpora hide whole categories** | Certain | High | The emitter gap survived 2517 tests, 15,000 fuzz iterations and a 402-case suite because every corpus was written from the same list of cases the code was written from. Closed at M6.6 by property tests (generated strings, exhaustive short strings) plus the suite round trip; prefer a property or a differential run over extending a list |
+| **A fix written from the same reading of the code that produced the bug inherits its blind spot** | Certain | High | M6.5's specified fix would have left 66 of 70 failures in place, because the analysis blamed the visible rule rather than the function called before it. Run the property against the fix before believing the diagnosis — it took one command and it disagreed |
+| **Stale `.o` files silently invalidate a measurement** | Certain | Medium | `pkgload::load_all()` leaves objects in `src/`, and `R CMD INSTALL .` reuses any `.o` newer than its `.c`. This produced two wrong results in one session: a benchmark showing a 3× parse regression that did not exist, and a "clean ASan run" on a build with no instrumentation in it. `find src -name '*.o' -delete` before any measurement, and verify the artifact — `nm -u zuyaml.so \| grep -c asan` for a sanitizer build |
+| A sanitizer run that is not actually watching | Medium | High | On macOS, R `dlopen`s the shared object and `DYLD_*` is stripped through the `R`/`Rscript` wrappers, so ASan loads too late to install interceptors. Run `$(R RHOME)/bin/exec/R` directly with `DYLD_INSERT_LIBRARIES`, and treat "no diagnostics" from a run that printed the interceptor warning as no evidence at all |
 | Handlers (M8) become an arbitrary-code-execution surface | Medium | High | Opt-in only, never default; documented as such; handler errors surface as zuyaml conditions with position |
 | `yaml12` closes the strictness gap | Medium | Medium | Its defaults (silent duplicate-key loss, unbounded alias expansion, `simplify = TRUE`) are design choices, not oversights; zuyaml's differentiation is the opposite choice, not a lead to protect |
 

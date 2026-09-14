@@ -64,10 +64,11 @@ static bool matches(const char* s, size_t n, const char* lit)
  * yaml_emit(list(x = "42")) produces `x: 42`, which parses back as the integer
  * 42 -- and version strings, zip codes and IDs all land there.
  *
- * Only the numeric gap is closed here; everything upstream already handles is
- * left to upstream. The null and boolean cases are included anyway because
- * they are two lines and make this function independently correct if the
- * upstream behaviour ever changes.
+ * This covers the type gap only. It is not the whole of what a plain scalar
+ * would lose: whitespace is handled by needs_nonplain_style() below, which is
+ * the second half of the same question and was missing until 0.1.0. Do not
+ * read "everything else is upstream's job" into either function -- upstream
+ * quotes for syntax, not for meaning, and the two are separate concerns.
  */
 static bool resolves_as_non_string(const char* s, size_t n)
 {
@@ -163,12 +164,89 @@ static bool resolves_as_non_string(const char* s, size_t n)
     return i == n;
 }
 
-/* Build a string scalar, quoting it when a plain scalar would change type. */
+/*
+ * Would a plain scalar lose part of this text outright?
+ *
+ * Separate from resolves_as_non_string(): that one asks whether the text would
+ * come back as a different *type*, this one whether it would come back at all.
+ *
+ *   - A line break in a plain or folded scalar is subject to flow folding, so
+ *     "a\nb" emits as `a b` and reparses as "a b". CR is folded the same way.
+ *   - A plain scalar cannot carry leading or trailing whitespace: the parser
+ *     strips it, so "  x  " and "\tbar" reparse stripped. A tab is easy to
+ *     overlook here -- "a\tb" survives, "\tbar" does not.
+ *   - Anything else a YAML plain scalar cannot hold (NUL is refused earlier;
+ *     the remaining C0 controls must be escaped) also has to leave the plain
+ *     style, or the emitted document is not parseable at all.
+ *
+ * Double-quoted is the answer for all of them: it escapes breaks and controls
+ * and preserves edge whitespace, so it round-trips unconditionally and needs
+ * none of the chomping or indentation-indicator machinery a literal block
+ * would. Literal blocks read better for genuinely multi-line text and are a
+ * readability question, not a correctness one.
+ */
+static bool needs_nonplain_style(const char* s, size_t n)
+{
+    size_t i;
+
+    if (n == 0) {
+        return false; /* resolves_as_non_string() already quotes the empty
+                         string, for a different reason */
+    }
+    if (s[0] == ' ' || s[0] == '\t' || s[n - 1] == ' ' || s[n - 1] == '\t') {
+        return true;
+    }
+    /* A lone "-", "?" or ":" is an indicator, not a scalar: `k: ?` does not
+       parse at all. Upstream allows these three to start a plain scalar when
+       the next character is not whitespace, but reads the end of the text as
+       "not whitespace" -- and at the end of a scalar the indicator stands
+       alone. (":" is already covered by upstream's trailing-colon rule; it is
+       listed so this function is right on its own terms.) */
+    if (n == 1 && (s[0] == '-' || s[0] == '?' || s[0] == ':')) {
+        return true;
+    }
+    for (i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)s[i];
+        /* Tab is deliberately not in this sweep: an interior tab is legal in a
+           plain scalar and survives the round trip, so quoting for it would
+           only make the output noisier. A leading or trailing one is caught
+           above, where it does not survive. */
+        if (c == '\t') {
+            continue;
+        }
+        if (c < 0x20 || c == 0x7f) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
+ * Build an explicit `null`.
+ *
+ * cyaml_new_null() makes a CYAML_NULL node, which the emitter treats as
+ * "empty" in a block mapping and writes as nothing at all, so `list(x = NULL)`
+ * emitted as `x:` with the line simply stopping. That reparses as NULL, so it
+ * is not a loss -- but it is exactly the shape a truncated document has, and
+ * the design says `null`. A plain scalar spelled `null` resolves as null under
+ * the core schema and says so on the page.
+ */
+static cyaml_node_t* new_null_node(cyaml_doc_t* doc)
+{
+    return cyaml_new_str(doc, "null", 4);
+}
+
+/*
+ * Build a string scalar, quoting it when a plain scalar would not survive a
+ * round trip -- either because the text would resolve as another type, or
+ * because the plain style would discard part of it.
+ */
 static cyaml_node_t* new_string_node(cyaml_doc_t* doc, const char* s, size_t n)
 {
     cyaml_node_t* node = cyaml_new_str(doc, s, n);
 
-    if (node != NULL && resolves_as_non_string(s, n)) {
+    if (node != NULL
+        && (resolves_as_non_string(s, n) || needs_nonplain_style(s, n))) {
         /* cyaml_node is fully defined in the public header, so setting the
            style is legitimate use of the API. */
         node->style = CYAML_DOUBLE;
@@ -188,11 +266,18 @@ static cyaml_node_t* new_string_node(cyaml_doc_t* doc, const char* s, size_t n)
  * numbers stay readable and only awkward ones grow. R requires LC_NUMERIC to
  * be "C", so the decimal separator is a point; the guard below is cheap
  * insurance rather than a real expectation.
+ *
+ * A double with an integral value needs a ".0" added. "%g" prints 450 for the
+ * double 450, which the core schema resolves as an *integer*, so the value
+ * comes back from a round trip as 450L -- a silent type change on ordinary
+ * data (the yaml-test-suite's own invoice example, UGM3, has `price: 450.00`).
+ * The exponent forms already resolve as floats and are left alone.
  */
 static void format_double(double v, char* buf, size_t buf_n)
 {
     int prec;
-    size_t i;
+    size_t i, n;
+    bool floatish = false;
 
     for (prec = 15; prec <= 17; prec++) {
         snprintf(buf, buf_n, "%.*g", prec, v);
@@ -204,6 +289,15 @@ static void format_double(double v, char* buf, size_t buf_n)
         if (buf[i] == ',') {
             buf[i] = '.';
         }
+        if (buf[i] == '.' || buf[i] == 'e' || buf[i] == 'E') {
+            floatish = true;
+        }
+    }
+    n = i;
+    if (!floatish && n + 2 < buf_n) {
+        buf[n] = '.';
+        buf[n + 1] = '0';
+        buf[n + 2] = '\0';
     }
 }
 
@@ -216,7 +310,7 @@ static cyaml_node_t* build_double(cyaml_doc_t* doc, double v)
     char buf[64];
 
     if (ISNA(v)) {
-        return cyaml_new_null(doc);
+        return new_null_node(doc);
     }
     if (ISNAN(v)) {
         return cyaml_new_str(doc, ".nan", 4);
@@ -234,11 +328,11 @@ static cyaml_node_t* build_element(cyaml_doc_t* doc, SEXP x, R_xlen_t i)
     switch (TYPEOF(x)) {
     case LGLSXP:
         return LOGICAL(x)[i] == NA_LOGICAL
-            ? cyaml_new_null(doc)
+            ? new_null_node(doc)
             : cyaml_new_bool(doc, LOGICAL(x)[i] != 0);
     case INTSXP:
         return INTEGER(x)[i] == NA_INTEGER
-            ? cyaml_new_null(doc)
+            ? new_null_node(doc)
             : cyaml_new_int(doc, (int64_t)INTEGER(x)[i]);
     case REALSXP:
         return build_double(doc, REAL(x)[i]);
@@ -246,7 +340,7 @@ static cyaml_node_t* build_element(cyaml_doc_t* doc, SEXP x, R_xlen_t i)
         SEXP el = STRING_ELT(x, i);
         const char* s;
         if (el == NA_STRING) {
-            return cyaml_new_null(doc);
+            return new_null_node(doc);
         }
         s = Rf_translateCharUTF8(el);
         return new_string_node(doc, s, strlen(s));
@@ -328,13 +422,43 @@ static cyaml_node_t* build_map(cyaml_doc_t* doc, SEXP x, SEXP names)
 
     for (i = 0; i < n; i++) {
         SEXP el = (TYPEOF(x) == VECSXP) ? VECTOR_ELT(x, i) : x;
+        const char* key = CHAR(STRING_ELT(names, i));
         cyaml_node_t* val = (TYPEOF(x) == VECSXP)
             ? build_node(doc, el)
             : build_element(doc, x, i);
 
-        if (val == NULL
-            || !cyaml_map_set(doc, map, CHAR(STRING_ELT(names, i)), val)) {
+        if (val == NULL || !cyaml_map_set(doc, map, key, val)) {
             zuyaml_stopf("memory", NULL, "Could not build a YAML mapping.");
+        }
+
+        /*
+         * A key gets exactly the same treatment as a value, and has to be
+         * reached afterwards: cyaml_map_set() builds the key node itself and
+         * leaves it plain, so `list("  x  " = 1)` emitted as `  x  : 1` and
+         * the key came back stripped to "x".
+         *
+         * Deliberately the same rule rather than a narrower one. Most keys
+         * that resolve as non-strings do survive, because the parser
+         * stringifies every key -- but a key spelled `null` or `~` resolves as
+         * a *null key*, which makes the whole mapping a zuyaml_map, and that
+         * cannot be emitted at all. Two rules where one will do is how the
+         * whitespace case stayed open in the first place. It also keeps the
+         * document honest for readers other than this package: `"42": 1` is a
+         * string key in Python and Go too, which is what R actually had.
+         *
+         * The pairs array is reallocated as it grows, so the pointer is taken
+         * after the set, never cached across iterations.
+         */
+        {
+            size_t key_n = strlen(key);
+            if (resolves_as_non_string(key, key_n)
+                || needs_nonplain_style(key, key_n)) {
+                cyaml_node_t* key_node
+                    = map->map.pairs[map->map.count - 1].key;
+                if (key_node != NULL) {
+                    key_node->style = CYAML_DOUBLE;
+                }
+            }
         }
     }
     return map;
@@ -368,7 +492,7 @@ static cyaml_node_t* build_node(cyaml_doc_t* doc, SEXP x)
     SEXP names;
 
     if (x == R_NilValue) {
-        return cyaml_new_null(doc);
+        return new_null_node(doc);
     }
 
     if (Rf_inherits(x, "zuyaml_bigint")) {

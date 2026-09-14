@@ -1,0 +1,36 @@
+--- a/src/cyaml.c	2026-09-14 00:00:00
++++ b/src/cyaml.c	2026-09-14 00:00:00
+@@ -60,12 +60,33 @@ CYAML_API char* cyaml_scalar_str(const cyaml_doc_t* doc, const cyaml_node_t* n)
+     if (!src)
+         return NULL;
+ 
+     const char* p = src + n->span.off;
+     const char* end = p + n->span.len;
+ 
++    /* zuyaml patch: the loops below re-read the span as YAML *source* -- they
++       fold line breaks into spaces, drop whitespace before a break, and decode
++       quote and escape sequences. That is right for a parsed document, where
++       the span points into the original text. It is wrong for a built one,
++       where the span is the literal string the caller handed to
++       cyaml_new_str(): "a\nb" comes back as "a b", and the emitter never sees
++       the break it would have quoted for. Built spans are returned verbatim.
++
++       Upstream has no parsed/built distinction here, so a built document
++       cannot currently round-trip any string containing a line break -- the
++       loss happens on the way out of this function, before any emitter style
++       decision. Reported as part of the zuyaml 0.1.0 review. */
++    if (doc->mode == CYAML_BUILDING) {
++        char* str = malloc(n->span.len + 1);
++        if (!str)
++            return NULL;
++        memcpy(str, p, n->span.len);
++        str[n->span.len] = C_NUL;
++        return str;
++    }
++
+     if (n->style == CYAML_LITERAL || n->style == CYAML_FOLDED) {
+         char* str = malloc(n->span.len + n->leading_breaks + n->trailing_breaks + 2);
+         if (!str)
+             return NULL;
+ 
+         char* out = str;

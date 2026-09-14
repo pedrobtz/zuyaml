@@ -45,6 +45,12 @@ jobs:
           ZUYAML_TEST_SUITE: ${{ runner.temp }}/yaml-test-suite
         run: Rscript tools/ci-run-tests.R
 
+      # The report the assertions cannot give: counts per boundary, every
+      # failure named, and a comparison against the baseline pinned in the
+      # script. Exits non-zero on a failure or on drift.
+      - name: Conformance report
+        run: Rscript tools/conformance.R "${{ runner.temp }}/yaml-test-suite"
+
   sanitizers:
     runs-on: ubuntu-latest
     name: ${{ matrix.sanitizer }}

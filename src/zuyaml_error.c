@@ -143,3 +143,51 @@ _Noreturn void zuyaml_stopf(const char* code, SEXP path, const char* fmt, ...)
     SEXP cond = PROTECT(build_condition(message, code, NULL, path));
     signal_condition(cond); /* noreturn */
 }
+
+/*
+ * As zuyaml_stopf(), for a failure the package detects itself at a known place
+ * in the input. The position is carried in the same `line`/`column` fields as
+ * a parse error from upstream, so a caller handling zuyaml_error does not have
+ * to know which layer noticed.
+ */
+_Noreturn void zuyaml_stopf_at(
+    const char* code, SEXP path, const cyaml_span_t* span, const char* fmt, ...)
+{
+    char message[512];
+    va_list ap;
+
+    va_start(ap, fmt);
+    vsnprintf(message, sizeof(message), fmt, ap);
+    va_end(ap);
+
+    SEXP cond = PROTECT(build_condition(message, code, span, path));
+    signal_condition(cond); /* noreturn */
+}
+
+/*
+ * Locate a byte offset as a 1-based line and column.
+ *
+ * Used for failures found by scanning the input before or outside the parser,
+ * which has no span to offer. Counting from the start is O(n) and happens only
+ * on the error path, which is about to unwind anyway.
+ */
+cyaml_span_t zuyaml_span_at(const char* src, size_t off)
+{
+    cyaml_span_t span = { 0 };
+    size_t i, line_start = 0;
+    uint32_t line = 1;
+
+    for (i = 0; i < off; i++) {
+        if (src[i] == '\n') {
+            line++;
+            line_start = i + 1;
+        }
+    }
+    span.off = (uint32_t)off;
+    span.len = 1;
+    span.start_line = line;
+    span.start_col = (uint32_t)(off - line_start) + 1;
+    span.end_line = span.start_line;
+    span.end_col = span.start_col + 1;
+    return span;
+}
