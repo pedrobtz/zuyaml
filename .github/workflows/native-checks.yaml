@@ -1,0 +1,77 @@
+# Memory safety, undefined behaviour and static analysis, from
+# pedrobtz/r-actions rather than from a second copy kept here.
+#
+# Three of these jobs used to live in hardening.yaml as hand-written steps.
+# They were correct, and that is the problem: a copied sanitizer job is one
+# that stops being maintained, and the traps it has to avoid are not obvious.
+# Two examples from this package's own history, both now handled upstream:
+# flags set as environment variables never reach the compiler, because R's
+# Makeconf assigns CFLAGS with `=`; and a stale object file newer than its
+# source is reused, so the flags reach only the link step. Either produces a
+# green job on a build with no instrumentation in it.
+#
+# hardening.yaml keeps what is genuinely specific to zuyaml: the full
+# yaml-test-suite against a pinned baseline, and the wrapper fuzzer.
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+  schedule:
+    # Weekly, so that a latent problem surfaces without waiting for a push.
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+name: native-checks.yaml
+
+permissions: read-all
+
+jobs:
+  # UBSan on an ordinary runner, plus ASan in the R-hub containers.
+  #
+  # asan-run replaces R CMD check with tools/sanitizer-exercise.R, which needs
+  # nothing but base R. Not for speed -- the default path measures about two
+  # minutes here -- but because a sanitizer earns its keep on the error and
+  # unwind paths, where an R error longjmps past the explicit
+  # cyaml_stream_free() and the external-pointer finalizer has to reclaim the
+  # stream. The testthat suite exercises those only incidentally; that script
+  # is most of the way built out of them.
+  sanitizers:
+    uses: pedrobtz/r-actions/.github/workflows/sanitizers.yml@v1
+    with:
+      asan: true
+      asan-dependencies: false
+      asan-run: Rscript tools/sanitizer-exercise.R tests/testthat/fixtures/yaml-test-suite
+
+  # The heap check CRAN runs on their valgrind machine, and the one ASan
+  # cannot fully stand in for while R itself is uninstrumented.
+  valgrind:
+    uses: pedrobtz/r-actions/.github/workflows/valgrind.yml@v1
+
+  # Cross-translation-unit declaration checking. zuyaml compiles 14 vendored
+  # cyaml files alongside its own, so a signature that drifts after a
+  # re-vendor is exactly the mismatch this catches and nothing else does.
+  lto:
+    uses: pedrobtz/r-actions/.github/workflows/lto.yml@v1
+
+  # The runtime counterpart to rchk. test-unwind-safety.R already runs
+  # gctorture around the conversion, error and emit paths; this runs the whole
+  # suite that way, which is broader and far slower.
+  #
+  # ZUYAML_FUZZ is not raised here on purpose: the fuzzer's 200 default
+  # iterations are about controlled failure, not about unprotected SEXPs, and
+  # under a GC every 20 allocations they would cost this job most of its
+  # budget while telling it nothing.
+  gctorture:
+    uses: pedrobtz/r-actions/.github/workflows/gctorture.yml@v1
+    with:
+      timeout-minutes: 180
+
+  # rchk is the only thing that ever found the build_node() PROTECT bug --
+  # not 2,900 assertions, not 15,000 fuzz iterations, not valgrind. The
+  # package is at zero findings now, so a new one is a regression and should
+  # fail rather than warn.
+  rchk:
+    uses: pedrobtz/r-actions/.github/workflows/rchk.yml@v1
+    with:
+      fail-on-findings: true

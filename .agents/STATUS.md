@@ -54,10 +54,11 @@ alphabet.
 | Property tests — generated strings, all 1- and 2-character indicator strings | pass; **found three further defects the review missed** |
 | Numeric extremes vs `zujson`'s stated rule | pass, **after fixing a fifth defect it found** |
 | Fuzzing — random bytes, syntax fragments, truncation | pass at 15,000 iterations each |
-| R-hub — valgrind, c23, nold, noremap, intel | pass |
-| R-hub — **rchk** | pass, **after fixing a real defect it found** |
+| valgrind, LTO, `gctorture`, **rchk** | pass — now automatic on every push via `native-checks.yaml`, not a manual R-hub dispatch |
+| R-hub — nold, and the on-demand flavours | pass; `c23`, `intel` and `noremap` were run on 2026-09-08 and are since **deprecated upstream** |
 | **ASan + UBSan** | **clean**, 2026-09-14 — the whole test suite and the full corpus |
 | Unwind safety — 8 poisoning loops, `gctorture` | pass, and now asserted |
+| CI arrangement | the generic native checks moved to `pedrobtz/r-actions@v1`; `hardening.yaml` keeps only what is specific to this package |
 | win-builder devel + release | submitted; results go to the maintainer by email |
 
 ### rchk found a PROTECT error
