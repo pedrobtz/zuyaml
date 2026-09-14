@@ -37,9 +37,9 @@ version if you depend on it.
 * A value emitted with `yaml_emit()` parses back to the same value. Strings
   containing a line break, and strings with leading or trailing whitespace, are
   quoted so that neither is lost; a double with an integral value emits as
-  `1.0` rather than `1`, so it does not come back as an integer; and mapping
-  keys get the same treatment as values. The property is asserted over the
-  whole yaml-test-suite and over generated input, not over a list of cases.
+  `1.0`, so it does not come back as an integer; and mapping keys are treated
+  exactly like values. Asserted over the whole yaml-test-suite and over
+  generated input. The exceptions are listed in `vignette("zuyaml")`.
 
 * A literal NUL byte in the input is refused with an `embedded_nul` condition
   and a position. The underlying library treats one as end of input, so the
@@ -48,10 +48,9 @@ version if you depend on it.
 
 * A UTF-8 byte order mark at the start of a stream is not part of the document.
 
-* A float outside the range of a double is converted to the nearest one:
-  `1e309` is `Inf`, `1e-324` is `0`, and `1e-323` is the subnormal it names.
-  These previously came back as *character strings*, so the R type of a field
-  depended on the magnitude of its value.
+* A float outside the range of a double converts to the nearest one: `1e309` is
+  `Inf`, `1e-324` is `0`, and `1e-323` is the subnormal it names. One extreme
+  value never changes the R type of a field.
 
 ## Notes
 
