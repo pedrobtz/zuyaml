@@ -1,4 +1,4 @@
-# Temporary: measure pedrobtz/r-actions#6 before it is merged.
+# Temporary: measure the `step` input from pedrobtz/r-actions#6, now on @v1.
 #
 # Branched from 9c95f82 -- the exact commit whose gctorture job took 107
 # minutes at the hardcoded step of 20 -- with nothing changed but `step`. The
@@ -20,7 +20,7 @@ jobs:
   # locally. Anything near 107 minutes means the input is not reaching
   # gctorture2().
   gctorture-100:
-    uses: pedrobtz/r-actions/.github/workflows/gctorture.yml@gctorture-step
+    uses: pedrobtz/r-actions/.github/workflows/gctorture.yml@v1
     with:
       step: 100
       timeout-minutes: 180
@@ -29,6 +29,6 @@ jobs:
   # baseline. It is the regression test for "no caller gets a less sensitive
   # check from a tag bump".
   gctorture-default:
-    uses: pedrobtz/r-actions/.github/workflows/gctorture.yml@gctorture-step
+    uses: pedrobtz/r-actions/.github/workflows/gctorture.yml@v1
     with:
       timeout-minutes: 180
