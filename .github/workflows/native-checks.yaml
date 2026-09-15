@@ -60,19 +60,15 @@ jobs:
   #
   # Two tiers, because one setting cannot be both fast enough to run on a push
   # and sensitive enough to be worth running at all. Measured on this package,
-  # same runner image: 82m30s at step 20, 18m38s at 100, 9m52s at 300.
+  # one run each: 82m30s at step 20, 18m38s at 100, 9m52s at 300, 5m44s at 500.
   #
-  # Those do not fit a clean 1/step. Fitting the widely separated pair (20 and
-  # 100) puts the fixed setup at 2.6 minutes and predicts 7m54s at step 300 --
-  # the real figure was 9m52s. Fitting the pair that brackets the range of
-  # interest (100 and 300) puts it at 5.5 minutes, which is more than half of
-  # what this job now costs. Extrapolating across a 15x range understated the
-  # floor, so prefer the near pair.
-  #
-  # Step 500 is chosen against that second fit, for about 8 minutes. The gain
-  # over 300 is small precisely because the floor is so much of the total;
-  # what it buys is margin, so an ordinarily slow runner does not push a
-  # push-blocking job past ten minutes.
+  # Do not fit a curve to these. Two attempts to extrapolate a fixed setup
+  # cost plus a 1/step term missed by about a quarter in one direction and a
+  # third in the other, and the second fit put a floor under the job that the
+  # step-500 run then finished inside. Each figure is a single sample and
+  # runner variance is the same size as the effect being modelled. Step 500
+  # was picked for margin under ten minutes and measures well under it; if it
+  # needs revisiting, measure the candidate rather than predicting it.
   #
   # The trade is sensitivity, not coverage. Every path still runs either way,
   # and the suite still forces thousands of collections at step 500. An
