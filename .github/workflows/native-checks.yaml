@@ -59,13 +59,23 @@ jobs:
   # suite that way, which is broader and far slower.
   #
   # Two tiers, because one setting cannot be both fast enough to run on a push
-  # and sensitive enough to be worth running at all. Measured on this package
-  # at 9c95f82, same commit, same runner image: step 20 took 82m30s and step
-  # 100 took 18m38s. That fits T = 2.6 + 1598/step minutes -- 2.6 of fixed
-  # setup, the rest torture -- which puts step 300 just under 8 minutes.
+  # and sensitive enough to be worth running at all. Measured on this package,
+  # same runner image: 82m30s at step 20, 18m38s at 100, 9m52s at 300.
+  #
+  # Those do not fit a clean 1/step. Fitting the widely separated pair (20 and
+  # 100) puts the fixed setup at 2.6 minutes and predicts 7m54s at step 300 --
+  # the real figure was 9m52s. Fitting the pair that brackets the range of
+  # interest (100 and 300) puts it at 5.5 minutes, which is more than half of
+  # what this job now costs. Extrapolating across a 15x range understated the
+  # floor, so prefer the near pair.
+  #
+  # Step 500 is chosen against that second fit, for about 8 minutes. The gain
+  # over 300 is small precisely because the floor is so much of the total;
+  # what it buys is margin, so an ordinarily slow runner does not push a
+  # push-blocking job past ten minutes.
   #
   # The trade is sensitivity, not coverage. Every path still runs either way,
-  # and the suite still forces thousands of collections at step 300. An
+  # and the suite still forces thousands of collections at step 500. An
   # unprotected SEXP is only caught when a collection lands while it is live,
   # so the wider step gives it a larger window to hide in -- which is what the
   # weekly step-20 run is for.
@@ -78,7 +88,7 @@ jobs:
     if: github.event_name != 'schedule'
     uses: pedrobtz/r-actions/.github/workflows/gctorture.yml@v1
     with:
-      step: 300
+      step: 500
       timeout-minutes: 30
 
   # The sensitive run, weekly and on demand. 82 minutes is fine when nobody
