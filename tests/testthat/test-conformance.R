@@ -31,9 +31,11 @@ suite_cases <- function() {
   inputs <- list.files(root, pattern = "^in\\.yaml$", recursive = TRUE,
                        full.names = TRUE)
   dirs <- dirname(inputs)
-  # A full checkout exposes every case a second time under name/, keyed by its
-  # description. Skip those: they are duplicates, and their paths are long.
-  dirs <- dirs[!grepl("(^|/)name/", dirs)]
+  # A full checkout exposes every case again under name/ (keyed by its
+  # description) and again under tags/ (keyed by category), both as symlink
+  # trees that list.files() follows. Skipping them turns 1,552 leaf paths back
+  # into the 402 real cases; the paths are also long enough to be awkward.
+  dirs <- dirs[!grepl("(^|/)(name|tags)/", dirs)]
   data.frame(
     id = basename(dirs),
     dir = dirs,
@@ -146,5 +148,57 @@ test_that("anything that parses can be emitted or refused deliberately", {
     }
   }
 
+  expect_identical(bad, character(), info = paste(bad, collapse = "\n"))
+})
+
+test_that("what the emitter produces parses back to the same value", {
+  # The assertion the suite loop was missing until 0.1.0. Every corpus in this
+  # package was enumerated from the same list of cases the code was written
+  # from, so the corpus was never the weak part -- this one call, reparsing
+  # what was just emitted, is what the emitter had no external check against.
+  # Without it, 70 of the 280 emittable documents came back as different
+  # values: every string containing a line break, plus edge whitespace and
+  # doubles with an integral value.
+  #
+  # This is a *property*, not a comparison against out.yaml. The package
+  # promises nothing about block-versus-flow or quoting choices, so diffing
+  # text would fail on style constantly and on meaning never.
+  cases <- suite_cases()
+  skip_if(is.null(cases), "no test suite available")
+
+  checked <- 0L
+  bad <- character()
+
+  for (i in seq_len(nrow(cases))) {
+    if (cases$should_fail[i]) next
+    path <- file.path(cases$dir[i], "in.yaml")
+    bytes <- readBin(path, "raw", n = file.info(path)$size)
+
+    docs <- tryCatch(yaml_parse_all(bytes, max_nodes = 1e6), error = function(e) NULL)
+    if (is.null(docs)) next
+
+    # A deliberate refusal (complex keys, duplicate names) is covered by the
+    # test above; there is nothing to reparse.
+    text <- tryCatch(yaml_emit_all(docs), zuyaml_error = function(e) NULL)
+    if (is.null(text)) next
+
+    checked <- checked + 1L
+    back <- tryCatch(
+      yaml_parse_all(text, max_nodes = 1e6),
+      error = function(e) structure(list(msg = conditionMessage(e)),
+                                    class = "zuyaml_reparse_failure")
+    )
+
+    if (inherits(back, "zuyaml_reparse_failure")) {
+      bad <- c(bad, sprintf("%s (%s): emitted YAML does not parse: %s",
+                            cases$id[i], describe_case(cases$dir[i]),
+                            back$msg))
+    } else if (!identical(docs, back)) {
+      bad <- c(bad, sprintf("%s (%s): value changed on round trip",
+                            cases$id[i], describe_case(cases$dir[i])))
+    }
+  }
+
+  expect_gt(checked, 20L)
   expect_identical(bad, character(), info = paste(bad, collapse = "\n"))
 })

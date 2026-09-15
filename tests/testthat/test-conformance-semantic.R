@@ -71,6 +71,45 @@ is_expected_mismatch <- function(id) {
     any(endsWith(id, paste0("-", expected_mismatch)))
 }
 
+# Read `in.json` as a *stream* of values.
+#
+# A YAML stream's in.json holds one JSON value per document, concatenated and
+# pretty-printed, so `{"a": 1}\n{"b": 2}` is not valid JSON as a whole and
+# jsonlite has no incremental reader. Splitting it needs no parser of our own:
+# accumulate lines, retry after each, and reset the buffer whenever the
+# accumulated text parses. Crude, but it needs nothing beyond what Suggests
+# already has, and the alternative was skipping streams entirely -- a construct
+# the package makes a point of handling.
+#
+# Returns NULL when the text cannot be split this way, so the caller skips the
+# case rather than reporting a disagreement that is really a reader failure.
+read_json_stream <- function(json_text) {
+  one <- function(txt) {
+    tryCatch(list(jsonlite::fromJSON(txt, simplifyVector = FALSE)),
+             error = function(e) NULL)
+  }
+
+  whole <- one(json_text)
+  if (!is.null(whole)) {
+    return(whole)
+  }
+
+  out <- list()
+  buffer <- character()
+  for (line in strsplit(json_text, "\n", fixed = TRUE)[[1]]) {
+    buffer <- c(buffer, line)
+    value <- one(paste(buffer, collapse = "\n"))
+    if (!is.null(value)) {
+      out <- c(out, value)
+      buffer <- character()
+    }
+  }
+  if (any(nzchar(trimws(buffer)))) {
+    return(NULL) # trailing text that never completed a value
+  }
+  out
+}
+
 semantic_cases <- function() {
   root <- suite_root_semantic()
   if (!dir.exists(root)) {
@@ -79,7 +118,9 @@ semantic_cases <- function() {
   inputs <- list.files(root, pattern = "^in\\.yaml$", recursive = TRUE,
                        full.names = TRUE)
   dirs <- dirname(inputs)
-  dirs <- dirs[!grepl("(^|/)name/", dirs)]
+  # name/ and tags/ are symlink trees re-exposing every case; see
+  # test-conformance.R.
+  dirs <- dirs[!grepl("(^|/)(name|tags)/", dirs)]
   dirs <- unique(dirs[file.exists(file.path(dirs, "in.json")) &
                         !file.exists(file.path(dirs, "error"))])
   dirs
@@ -111,11 +152,6 @@ test_that("parsed values match the suite's own JSON rendering", {
       next
     }
 
-    # A stream's in.json holds one JSON value per document, concatenated and
-    # pretty-printed. Splitting that reliably needs an incremental parser, so
-    # only single-document cases are compared.
-    if (length(docs) != 1L) next
-
     # in.json is UTF-8 whatever the session's locale is. readLines() would
     # leave its bytes unmarked, and in a C locale jsonlite then escapes them
     # into literal "<e2><99><a5>" text -- so H3Z8 would look like a conversion
@@ -124,14 +160,20 @@ test_that("parsed values match the suite's own JSON rendering", {
     json_file <- file.path(d, "in.json")
     json_text <- rawToChar(readBin(json_file, "raw", file.info(json_file)$size))
     Encoding(json_text) <- "UTF-8"
-    reference <- tryCatch(
-      jsonlite::fromJSON(json_text, simplifyVector = FALSE),
-      error = function(e) NULL
-    )
+    reference <- read_json_stream(json_text)
     if (is.null(reference)) next
 
+    # One reference value per document, streams included. A mismatch in count
+    # is itself a disagreement worth reporting: it means the package split the
+    # stream differently from the suite.
+    if (length(reference) != length(docs)) {
+      wrong <- c(wrong, sprintf("%s: %d document(s), reference has %d",
+                                id, length(docs), length(reference)))
+      next
+    }
+
     compared <- compared + 1L
-    agrees <- identical(normalise(docs[[1]]), normalise(reference))
+    agrees <- identical(normalise(docs), normalise(reference))
 
     if (is_expected_mismatch(id)) {
       # Listed as a known difference. If it starts agreeing, the note above is
@@ -145,7 +187,7 @@ test_that("parsed values match the suite's own JSON rendering", {
     } else if (!agrees) {
       wrong <- c(wrong, sprintf(
         "%s: got %s, reference %s", id,
-        substr(paste(deparse(docs[[1]]), collapse = " "), 1, 90),
+        substr(paste(deparse(docs), collapse = " "), 1, 90),
         substr(paste(deparse(reference), collapse = " "), 1, 90)
       ))
     }

@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <stdint.h>
@@ -24,22 +25,29 @@ static bool all_digits(const char* s, size_t n)
     return true;
 }
 
-_Noreturn static void stop_embedded_nul(void)
+_Noreturn static void stop_embedded_nul(const cyaml_node_t* node)
 {
-    zuyaml_stopf("embedded_nul", NULL,
-        "YAML scalar contains an embedded NUL byte, which cannot be "
-        "represented as an R string.");
+    zuyaml_stopf_at("embedded_nul", NULL, &node->span,
+        "YAML scalar at line %u, column %u contains an embedded NUL byte, "
+        "which cannot be represented as an R string.",
+        (unsigned)node->span.start_line, (unsigned)node->span.start_col);
 }
 
 /*
  * R character strings cannot contain an embedded NUL, and Rf_mkCharLenCE()
  * raises an error if handed one -- which is an unwind. Detect it first so we
  * can free any C allocation and raise a proper condition instead.
+ *
+ * A *literal* NUL in the input is refused before the parser runs
+ * (check_input_nul() in zuyaml_parse.c), because cyaml would have truncated
+ * the document at it. What can still arrive here is a NUL the parser produced:
+ * the \0 escape below, and any future decoding path that can synthesise one.
+ * The guard is kept rather than assumed unreachable.
  */
-static void check_no_nul(const char* s, size_t len)
+static void check_no_nul(const char* s, size_t len, const cyaml_node_t* node)
 {
     if (memchr(s, '\0', len) != NULL) {
-        stop_embedded_nul();
+        stop_embedded_nul(node);
     }
 }
 
@@ -141,7 +149,7 @@ static SEXP scalar_charsxp(const cyaml_doc_t* doc, const cyaml_node_t* node)
         if (raw == NULL || raw_n == 0) {
             return Rf_mkCharLenCE("", 0, CE_UTF8);
         }
-        check_no_nul(raw, (size_t)raw_n);
+        check_no_nul(raw, (size_t)raw_n, node);
         return Rf_mkCharLenCE(raw, (int)raw_n, CE_UTF8);
     }
 
@@ -149,10 +157,10 @@ static SEXP scalar_charsxp(const cyaml_doc_t* doc, const cyaml_node_t* node)
        a NUL-producing escape without telling us. */
     {
         if (raw != NULL && raw_n > 0) {
-            check_no_nul(raw, (size_t)raw_n);
+            check_no_nul(raw, (size_t)raw_n, node);
             if (node->style == CYAML_DOUBLE
                 && has_nul_escape(raw, (size_t)raw_n)) {
-                stop_embedded_nul();
+                stop_embedded_nul(node);
             }
         }
     }
@@ -310,15 +318,75 @@ static SEXP scalar_int(const cyaml_doc_t* doc, const cyaml_node_t* node,
  * an error -- erroring would reject documents that parsed before tags were
  * honoured at all.
  */
+/*
+ * Convert a float that cyaml refused because the value is out of range.
+ *
+ * `cyaml_str_to_f64()` treats a non-zero `errno` as failure, and `strtod()`
+ * sets `ERANGE` for overflow, for underflow to zero, **and** for any subnormal
+ * result. So `1e309`, `1e-324` and the perfectly representable `1e-323` were
+ * all handed back as *character strings*: a field's R type depended on the
+ * magnitude of its value, which is the one thing the design's `simplify`
+ * argument says must never happen. A caller reading `timeout: 1e308` got a
+ * double and the same caller reading `timeout: 1e309` got a string.
+ *
+ * `ERANGE` is exactly the case where the answer is well defined -- C requires
+ * strtod to return the nearest representable value, so +-HUGE_VAL, zero, or
+ * the subnormal -- and it is the value R's own reader gives for the same text.
+ * Sharing that rule with `zujson`, which states it as "generous about numbers,
+ * strict about text": one absurd number should not change the type of a field,
+ * let alone invalidate a document.
+ *
+ * Text that is not a number at all still falls back to a string, which is what
+ * an unresolvable scalar is in YAML -- that is the `!!float abc` path below,
+ * and it is unaffected.
+ */
+static bool out_of_range_double(
+    const cyaml_doc_t* doc, const cyaml_node_t* node, double* out)
+{
+    const char* raw = cyaml_str(doc, node);
+    uint32_t raw_n = cyaml_len(node);
+    char stack_buf[64];
+    char* text;
+    char* endp;
+    double v;
+
+    if (raw == NULL || raw_n == 0) {
+        return false;
+    }
+    /* The span is not NUL-terminated, and strtod() needs it to be. A long one
+       is legitimate (0.000...1), so it is copied rather than bounded. */
+    text = ((size_t)raw_n < sizeof(stack_buf))
+        ? stack_buf
+        : (char*)R_alloc((size_t)raw_n + 1u, 1); /* freed when .Call returns */
+    memcpy(text, raw, (size_t)raw_n);
+    text[raw_n] = '\0';
+
+    /* R guarantees LC_NUMERIC is "C", so the decimal separator is a point.
+       zuyaml_emit.c relies on the same guarantee when formatting doubles. */
+    errno = 0;
+    v = strtod(text, &endp);
+    if (endp == text || *endp != '\0') {
+        return false; /* not a number; a string, as YAML says */
+    }
+    if (errno != 0 && errno != ERANGE) {
+        return false;
+    }
+    *out = v;
+    return true;
+}
+
 static SEXP scalar_double(const cyaml_doc_t* doc, const cyaml_node_t* node)
 {
     double v;
 
     /* Handles .inf, -.inf and .nan. */
-    if (!cyaml_as_float(doc, node, &v)) {
-        return scalar_string(doc, node);
+    if (cyaml_as_float(doc, node, &v)) {
+        return Rf_ScalarReal(v);
     }
-    return Rf_ScalarReal(v);
+    if (out_of_range_double(doc, node, &v)) {
+        return Rf_ScalarReal(v);
+    }
+    return scalar_string(doc, node);
 }
 
 static SEXP scalar_bool(const cyaml_doc_t* doc, const cyaml_node_t* node)

@@ -133,3 +133,44 @@ the 64-bit boundary values explicitly.
 
 **Worth reporting upstream:** it is a real defect independent of zuyaml, in a
 function any caller reaches through `cyaml_as_int()`.
+
+## 0005-scalar-str-built-verbatim.patch
+
+**Why it is required:** `cyaml_scalar_str()` re-reads a node's span as YAML
+*source*: it folds line breaks into spaces, drops whitespace before a break,
+and decodes quote and escape sequences. That is correct for a parsed document,
+where the span points into the original text. For a **built** document the span
+is the literal string the caller passed to `cyaml_new_str()`, and reinterpreting
+it destroys the value:
+
+```c
+cyaml_new_str(doc, "a\nb", 3);   /* cyaml_scalar_str() returns "a b" */
+```
+
+The emitter calls `cyaml_scalar_str()` first and decides the scalar style from
+its result, so the break is already gone before `needs_quoting_ex()` could
+promote the scalar to double-quoted. No caller-side style choice can prevent
+it: `yaml_emit(list(a = "a\nb"))` emitted `a: a b`, which reparses as `"a b"`.
+**Every string containing a line break was silently corrupted on emit** — 70 of
+the 280 emittable yaml-test-suite documents.
+
+**What it does:** returns the span verbatim when `doc->mode == CYAML_BUILDING`.
+Parsed documents keep the existing path untouched.
+
+**Why it is safe here:** the two modes are distinguished by upstream's own
+`cyaml_mode_t`, set by `cyaml_doc_new()` versus `cyaml_parse_stream()`. zuyaml
+only ever emits built documents, and only ever converts parsed ones, so the two
+paths do not meet. A built span holds exactly the bytes the caller supplied;
+returning them unchanged is what every caller of the builder API already
+expects.
+
+**Why the caller-side fix is not enough on its own:**
+`needs_nonplain_style()` in `src/zuyaml_emit.c` marks these strings
+`CYAML_DOUBLE` before building, which fixes leading and trailing whitespace —
+that text reaches the emitter intact. It cannot fix line breaks, because the
+folding happens inside `cyaml_scalar_str()` regardless of style. Both changes
+are needed, and they close different halves of the same defect.
+
+**Worth reporting upstream:** it is a real defect independent of zuyaml.
+Any caller that builds a document containing a multi-line string and emits it
+gets a different string back.

@@ -43,6 +43,12 @@ _Noreturn void zuyaml_stop_parse_error(
 _Noreturn void zuyaml_stopf(
     const char* code, SEXP path, const char* fmt, ...);
 
+_Noreturn void zuyaml_stopf_at(const char* code, SEXP path,
+    const cyaml_span_t* span, const char* fmt, ...);
+
+/* Locate a byte offset in `src` as a 1-based line and column. */
+cyaml_span_t zuyaml_span_at(const char* src, size_t off);
+
 /* .Call entry points (registered in init.c). */
 SEXP zuyaml_parse_(SEXP x, SEXP simplify, SEXP aliases, SEXP big_integers,
     SEXP tags, SEXP duplicate_keys, SEXP max_depth, SEXP max_size,

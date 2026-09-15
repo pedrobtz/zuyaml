@@ -79,6 +79,61 @@ static uint32_t as_uint32(SEXP x, const char* arg, SEXP path)
     return (uint32_t)v;
 }
 
+/* --- input hygiene ------------------------------------------------------ */
+
+/*
+ * Strip a leading UTF-8 byte order mark.
+ *
+ * A BOM is permitted at the start of a YAML stream and is not part of the
+ * content, but cyaml leaves it in the first scalar, so `\xEF\xBB\xBF` ends up
+ * inside the first key name. Advancing past it before the parser sees it keeps
+ * every offset cyaml reports relative to the same buffer, so spans, line and
+ * column numbers stay consistent -- and a column on line 1 now counts from the
+ * first real character, which is the useful answer.
+ *
+ * Only the start of the stream is handled. A BOM before a later document in a
+ * stream is rarer, and removing it would mean rewriting the buffer rather than
+ * moving a pointer.
+ */
+static void skip_bom(const char** src, size_t* len)
+{
+    const unsigned char* p = (const unsigned char*)*src;
+
+    if (*len >= 3 && p[0] == 0xEF && p[1] == 0xBB && p[2] == 0xBF) {
+        *src += 3;
+        *len -= 3;
+    }
+}
+
+/*
+ * Refuse input containing a literal NUL byte.
+ *
+ * cyaml treats a NUL as end of input: the scalar span is cut at it and every
+ * document after it is silently dropped, so `a: 1\nb: x<NUL>y\nc: 3\n` parses
+ * as two keys with `b` truncated to "x" and no sign that anything was lost.
+ * The check in zuyaml_convert.c cannot see this -- by the time it holds a span,
+ * the truncation has already happened -- so the whole buffer is scanned here,
+ * before the parser is handed anything.
+ *
+ * Refusing is the only honest answer: R strings cannot hold a NUL, so there is
+ * no value to return, and the alternative is a document whose tail was
+ * discarded without a word.
+ */
+static void check_input_nul(const char* src, size_t len, SEXP path)
+{
+    const char* hit = (const char*)memchr(src, '\0', len);
+    cyaml_span_t span;
+
+    if (hit == NULL) {
+        return;
+    }
+    span = zuyaml_span_at(src, (size_t)(hit - src));
+    zuyaml_stopf_at("embedded_nul", path, &span,
+        "Input contains a NUL byte at line %u, column %u, which cannot appear "
+        "in a YAML document.",
+        (unsigned)span.start_line, (unsigned)span.start_col);
+}
+
 /* --- entry point -------------------------------------------------------- */
 
 /*
@@ -102,6 +157,7 @@ SEXP zuyaml_parse_(SEXP x, SEXP simplify, SEXP aliases, SEXP big_integers,
     zuyaml_ctx_t ctx;
 
     src = input_bytes(x, &len, path);
+    skip_bom(&src, &len);
 
     /* cyaml_parse_stream takes a size_t, but cyaml_span_t offsets and
        cyaml_stream_t.src_len are uint32_t, so the real ceiling is 4 GiB.
@@ -148,6 +204,10 @@ SEXP zuyaml_parse_(SEXP x, SEXP simplify, SEXP aliases, SEXP big_integers,
             "Input is %.0f bytes, which exceeds max_size (%u).",
             (double)len, (unsigned)opts.max_size);
     }
+
+    /* After the size limits, so that an oversized input is refused without
+       walking it, and before the parser, which would truncate at the NUL. */
+    check_input_nul(src, len, path);
 
     stream = cyaml_parse_stream(src, len, &opts, &err);
     if (stream == NULL) {

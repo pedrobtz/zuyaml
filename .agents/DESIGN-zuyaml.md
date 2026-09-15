@@ -444,6 +444,39 @@ package must not require one.
 YAML floats become R doubles, including `.inf` → `Inf`, `-.inf` → `-Inf`,
 `.nan` → `NaN`.
 
+**Out of range is still a number.** A float whose value overflows, underflows,
+or lands in the subnormal range has a well-defined nearest double — C requires
+`strtod()` to return it — so it is converted, not refused:
+
+| text | result |
+|---|---|
+| `1e309`, `123123e100000` | `Inf` |
+| `-1e309` | `-Inf` |
+| `1e-324`, `123e-10000000` | `0` |
+| `1e-323` | the subnormal `9.88e-324` |
+
+This is the rule `zujson` states as **"generous about numbers, strict about
+text"**, and the two packages are deliberately aligned on it. The argument is
+stronger here than "one absurd value should not fail a document", because the
+alternative is not a failure at all. `cyaml_str_to_f64()` treats a non-zero
+`errno` as failure and `strtod()` sets `ERANGE` for all three cases, so these
+scalars fell through to the string fallback below: `timeout: 1e308` gave a
+double and `timeout: 1e309` gave the string `"1e309"`. **The R type of a field
+depended on the magnitude of its value** — which is precisely what §6.1's
+`simplify = FALSE` argument exists to prevent, arriving by another route.
+
+Generosity applies to *numbers only*. Text that is not a number is still a
+string, so `!!float abc` is `"abc"` and `1e309 and more` is a string.
+
+**Where this does not follow `zujson`:** an integer beyond 2^53 is a
+`zuyaml_bigint` here and the nearest double there. That is deliberate, and the
+difference is the medium. `zujson` reads HTTP response bodies, where a wide
+integer is usually an identifier nobody arithmetically needs and a double is a
+fine carrier; YAML is written by hand and read as configuration, where a
+silently rounded integer is a wrong number in a file someone will diff.
+`big_integers = "double"` opts into `zujson`'s answer in one argument. Whether
+the *default* should change is design §22's open question, not a bug.
+
 #### String
 
 All quoted scalars are strings; plain scalars classified `CYAML_KIND_STRING` are
@@ -652,7 +685,7 @@ callbacks into R are explicitly out of scope (§9.3).
 | `NULL` | `null` |
 | `TRUE` / `FALSE` | `true` / `false` |
 | integer scalar | integer |
-| finite double | numeric text that round-trips the double |
+| finite double | numeric text that round-trips the double, always spelled as a float (`1` emits as `1.0`) |
 | `Inf` / `-Inf` / `NaN` | `.inf` / `-.inf` / `.nan` |
 | `NA` (any type) | `null` — lossy, see §8 |
 | character scalar | string, style per §7.2 |
@@ -660,7 +693,10 @@ callbacks into R are explicitly out of scope (§9.3).
 | factor | its character labels, never its integer codes |
 
 Doubles must be formatted with enough precision to round-trip the value, using
-locale-independent formatting.
+locale-independent formatting, **and must always look like a float**. `%g`
+prints the double `450` as `450`, which the core schema resolves as an integer,
+so an integral double came back from a round trip as `450L`. A `.0` is appended
+when the formatted text contains neither a `.` nor an exponent.
 
 `zuyaml_bigint` is re-validated at emit time. Trusting the class attribute —
 "emit as an integer, the representation was validated on the way in" — is not
@@ -687,12 +723,41 @@ land here, so the round-trip guarantee in §16.2 fails on ordinary data.
 than a string under the YAML 1.2 core schema. `cyaml_node` is fully defined in the
 public header, so assigning `style` is legitimate use of the API.
 
-The check is a small C helper mirroring the core-schema resolution patterns —
-null (`null|Null|NULL|~|`), bool (`true|True|TRUE|false|False|FALSE`), int
-(decimal, `0x`, `0o`), float (including `.inf`, `-.inf`, `.nan`) — and nothing
-else. Everything the upstream `needs_quoting_ex()` already handles (indicators,
-`---`, trailing `:`, `: `, ` #`, line breaks, the reserved words, the empty
-string) is left to upstream: this helper only closes the numeric gap.
+**Two questions, not one.** A plain scalar can fail a round trip in two
+independent ways, and the original rule asked only the first:
+
+1. *Would the text come back as a different type?* — `resolves_as_non_string()`,
+   a C helper mirroring the core-schema resolution patterns: null
+   (`null|Null|NULL|~|`), bool (`true|True|TRUE|false|False|FALSE`), int
+   (decimal, `0x`, `0o`), float (including `.inf`, `-.inf`, `.nan`).
+
+2. *Would the text come back at all?* — `needs_nonplain_style()`: a line break
+   anywhere (flow folding turns it into a space), leading or trailing
+   whitespace — **space or tab** (a plain scalar cannot carry either), a C0
+   control other than tab, and a scalar that is exactly `-`, `?` or `:`, which
+   are indicators rather than scalars.
+
+Upstream's `needs_quoting_ex()` is not a substitute for either. It quotes for
+*syntax* — indicators, `---`, trailing `:`, `: `, ` #` — and has no whitespace
+test at all. Reading it as "upstream handles everything else" is precisely what
+left the whitespace half of this open until 0.1.0, so that every string
+containing a newline was silently corrupted on emit. **When adding a rule here,
+ask both questions.**
+
+**Keys are values.** `cyaml_map_set()` builds the key node itself and leaves it
+plain, so the style has to be applied to the key node afterwards. Keys get the
+*same* rule, not a narrower one: most keys that resolve as non-strings do
+survive, because the parser stringifies every key, but a key spelled `null` or
+`~` resolves as a null key, which makes the whole mapping a `zuyaml_map` and
+cannot be emitted at all. It also keeps the document honest for readers other
+than this package — `"42": 1` is a string key in Python and Go too.
+
+**Where the loss actually happens.** Choosing the style is not sufficient on its
+own. `cyaml_scalar_str()` re-reads a node's span as YAML *source*, folding line
+breaks into spaces — correct for a parsed document, wrong for a built one — and
+the emitter calls it *before* deciding anything, so the break was gone before
+any style rule could see it. That is vendored patch 0005; see
+`tools/patches/README.md`.
 
 Do not "fix" this by double-quoting every string. `name: "zuyaml"` for every
 scalar produces YAML nobody wants to read.
@@ -759,7 +824,7 @@ here.
 | Non-string scalar keys | Stringified (`1` → `"1"`) | Semantically |
 | Collection-valued keys | Preserved as `zuyaml_map` on parse | **No** — cannot emit |
 | Duplicate keys (opt-in) | Duplicate R names | **No** — cannot emit |
-| `NA` | Emitted as `null`, parses back as `NULL` | **No** |
+| `NA` | Emitted as an explicit `null`, parses back as `NULL` | **No** |
 | `list(1L)` vs `c(1L)` | Both emit `- 1` / `1` | **No** — list/vector distinction lost |
 | Big integers with `big_integers = "double"` | Precision lost | No (opt-in) |
 
@@ -767,6 +832,12 @@ The `NA` case deserves its own note. Erroring would be more consistent with §7.
 treatment of partial names, but `NA` appears in ordinary R data far too often for
 that to be tolerable, and no YAML 1.2 core-schema value means "missing". Mapping
 it to `null` is the least-bad option, and it is listed here rather than buried.
+
+`NULL` and `NA` emit as an explicit `null` rather than as an empty value.
+cyaml's own null node emits as nothing at all in a block mapping — `x:`, with
+the line simply stopping — which reparses correctly but is exactly the shape a
+truncated document has. A package whose argument is that ambiguity should be
+visible should not produce it.
 
 This input:
 
@@ -1100,11 +1171,33 @@ takes a `size_t len`. R raw vectors can exceed 2^31 elements on 64-bit builds.
 Reject input ≥ 4 GiB in R, up front, with a clear message — independently of
 `max_size`, which the user may have raised.
 
-**Embedded NUL.** `\0` is a valid escape in a YAML double-quoted scalar, so
+**Embedded NUL — two separate cases, and only one is visible from conversion.**
+
+*The escape.* `\0` is a valid escape in a YAML double-quoted scalar, so
 `key: "\0"` is a legal document that produces a scalar containing a NUL byte. R
 character strings cannot hold one: `Rf_mkCharLenCE()` errors, which is also an
 unwind (§9.3). Detect this during conversion and raise a proper `"embedded_nul"`
 condition rather than letting an R internal error escape.
+
+*The literal byte.* cyaml treats a literal NUL as **end of input**. The scalar
+span is cut at it and every later document in the stream is gone, so
+
+```text
+a: 1\nb: x<NUL>y\nc: 3\n   ->   $a 1, $b "x"      # c vanished, no condition
+```
+
+A check during conversion cannot see this: by the time it holds a span, the
+truncation has already happened. **The input buffer is scanned for a NUL before
+it is handed to the parser**, and the same `"embedded_nul"` condition is raised
+with a line and column. Refusing is the only honest answer — R has no value to
+return, and the alternative is a document whose tail was discarded silently.
+
+**Byte order mark.** A UTF-8 BOM is permitted at the start of a stream and is
+not part of the content, but cyaml leaves it in the first scalar, so it lands
+inside the first key name. Skip it before parsing, by advancing the pointer:
+every offset cyaml reports then stays relative to the same buffer, so spans and
+positions remain consistent and a column on line 1 counts from the first real
+character.
 
 **Also required:** validate every length conversion before narrowing to upstream's
 integer widths; check every allocation result; keep R-side recursion bounded by
@@ -1271,7 +1364,9 @@ Ordinary behaviour, plus every case this design calls out:
 - **numeric-looking strings** (`"42"`, `".inf"`, `"0x1F"`, `"true"`, `"null"`)
   surviving an emit/parse round trip — the §7.2 regression test;
 - **`key: "\0"`** producing a clean `"embedded_nul"` error, not an R internal
-  error;
+  error, and a **literal** NUL byte anywhere in the input producing the same
+  condition rather than a truncated document;
+- a leading **UTF-8 BOM** parsing identically to the same document without one;
 - malformed YAML, deep nesting, and each of `max_depth`, `max_size`, `max_nodes`;
 - `indent`/`width` at 0, 255, and 256 (the `uint8_t` boundary);
 - `cyaml_version()` matching `inst/cyaml-VERSION` — catches a botched vendor
@@ -1289,6 +1384,46 @@ explicitly excludes everything in §8's table; those rows get their own tests
 asserting the *documented* lossy behaviour, so that a future change to any of them
 is a deliberate test update rather than a silent regression.
 
+**Assert this as a property, over generated input.** The original suite was a
+hand-written list enumerated from §7.2, and a list can only hold cases someone
+thought of — by the same person who wrote the rule. It missed line breaks,
+edge whitespace, integral doubles, and the lone `-` and `?`. The replacement is
+three things, none of them a list:
+
+- **the conformance corpus**, reparsing what the emitter produced for every
+  case that emits (§16.3) — this is one call, and its absence is the whole
+  reason the defects survived;
+- **generated strings** over an alphabet weighted towards line breaks,
+  whitespace and indicators, exercised as a bare scalar, a sequence element, a
+  mapping value, a mapping **key**, and nested, at several `width` settings;
+- **exhaustive short strings** — every one- and two-character string over the
+  indicator alphabet. That is where an off-by-one in a style rule lives, and it
+  is what found `k: ?`, which does not parse at all.
+
+**Never write a double as an R source literal in a test.** Compare against its
+IEEE-754 bit pattern, read through `readBin()` — `helper-doubles.R` has the
+one-line helper. R's own string-to-double conversion accumulates through
+`LDOUBLE`, which on `aarch64` is plain `double` rather than 80-bit extended, so
+R's reader is not correctly rounded at the extremes. On Apple silicon:
+
+| token | this package (correctly rounded) | R's reader |
+|---|---|---|
+| `1e308` | `0x7fe1ccf385ebc8a0` | `0x7fe1ccf385ebc8a3` |
+| `1e300` | `0x7e37e43c8800759c` | `0x7e37e43c880075a0` |
+| `2.2250738585072014e-308` | `0x0010000000000000` (`DBL_MIN`) | `0x000ffffffffffffc` |
+| `1.7976931348623157e308` | `0x7fefffffffffffff` (`DBL_MAX`) | `0x7ff0000000000000` — **`Inf`** |
+
+An R *hex* literal is not a way out either: `0x1p-1074` reads as `0` in R
+source, because R's reader underflows on subnormals it can represent perfectly
+well. A test written the obvious way therefore passes everywhere except macOS,
+and blames the parser for a mistake in the reference. Where a value genuinely
+does go through R's reader, `as.numeric()` remains the right reference, because
+tracking R is the documented behaviour there. (`zujson` hit this first and
+documents it in its testing article; the practice is shared.)
+
+A new emitter rule is not finished until the property passes; a new *case* in a
+list is not evidence that the rule is right.
+
 ### 16.3 Upstream conformance
 
 **In the package:** a curated yaml-test-suite subset covering scalars, flow and
@@ -1303,7 +1438,21 @@ deliberately does not expose (§3.1), so the R-level assertions are:
 - every case marked valid parses without error, and every case marked invalid
   errors;
 - for cases shipping an `in.json` equivalent, the parsed R object matches the
-  JSON-derived expectation under the documented conversion rules.
+  JSON-derived expectation under the documented conversion rules — **including
+  multi-document cases**, whose `in.json` concatenates one value per document
+  and is split by accumulating lines and retrying the parse;
+- everything that emits reparses to the same value (§16.2).
+
+`out.yaml` is deliberately **not** used as a reference. It is the suite's own
+re-serialisation and encodes block-versus-flow and quoting choices the package
+explicitly does not commit to, so diffing against it would fail on style
+constantly and on meaning never. The emitter needs a property, not a reference
+file.
+
+`tools/conformance.R` runs all of this against a full checkout and reports
+counts per boundary, names every failure, and compares against a pinned
+baseline. It lives in `tools/` rather than `tests/` because a report is not an
+assertion and the baseline is meant to be edited deliberately.
 
 Run the full suite whenever the vendored version changes.
 
