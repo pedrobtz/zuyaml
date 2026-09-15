@@ -377,6 +377,48 @@ err$column
 #> [1] 1
 ```
 
+### Numbers at the edges
+
+A number outside what a double can hold still has a well-defined nearest
+value, so it is converted rather than refused or turned into text. One
+extreme value does not change the type of a field:
+
+``` r
+
+str(yaml_parse("[1e309, -1e309, 1e-324, 1e-323]"))
+#> List of 4
+#>  $ : num Inf
+#>  $ : num -Inf
+#>  $ : num 0
+#>  $ : num 9.88e-324
+```
+
+Text that is not a number is still text — the generosity is about
+numbers only:
+
+``` r
+
+str(yaml_parse("[!!float abc, 1e309 and more]"))
+#> List of 2
+#>  $ : chr "abc"
+#>  $ : chr "1e309 and more"
+```
+
+Integers are the one place this package is deliberately less generous.
+Beyond 2^53 an integer becomes a `zuyaml_bigint` rather than a rounded
+double, because a silently rounded integer in a configuration file is a
+wrong number someone will diff. `big_integers = "double"` opts out.
+
+``` r
+
+str(yaml_parse("id: 9007199254740993"))
+#> List of 1
+#>  $ id: 'zuyaml_bigint' chr "9007199254740993"
+str(yaml_parse("id: 9007199254740993", big_integers = "double"))
+#> List of 1
+#>  $ id: num 9.01e+15
+```
+
 ## What does not round-trip
 
 Every entry below is a deliberate trade-off, not an oversight.
@@ -390,10 +432,28 @@ Every entry below is a deliberate trade-off, not an oversight.
 | Non-string scalar keys | Stringified (`1` → `"1"`) | Semantically |
 | Collection-valued keys | `zuyaml_map` on parse | **No** — cannot be emitted |
 | Duplicate keys (opt-in) | Duplicate R names | **No** — cannot be emitted |
-| `NA` | Emitted as `null`, parses back as `NULL` | **No** |
+| `NA` | Emitted as an explicit `null`, parses back as `NULL` | **No** |
 | `list(1L)` vs `c(1L)` | Both emit `- 1` | **No** |
-| Whole-numbered doubles | Emit as `42`, parse back as integer | Numerically |
 | `big_integers = "double"` | Precision lost | No (opt-in) |
+
+Everything else does round-trip, including the cases that are easy to
+get wrong. Strings with a line break or with leading or trailing
+whitespace are quoted, mapping keys are treated exactly like values, and
+a whole-numbered double emits as `1.0` so that it does not come back as
+an integer:
+
+``` r
+
+x <- list(notes = "first line\nsecond line\n", padded = "  keep me  ",
+          ratio = 2, `  spaced key  ` = 1L)
+cat(yaml_emit(x))
+#> notes: "first line\nsecond line\n"
+#> padded: "  keep me  "
+#> ratio: 2.0
+#> "  spaced key  ": 1
+identical(yaml_parse(yaml_emit(x)), x)
+#> [1] TRUE
+```
 
 `zuyaml` is a semantic parser, not a round-trip editor: it converts
 values, and formatting is not part of the value. Preserving comments and

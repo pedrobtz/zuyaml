@@ -83,7 +83,7 @@
 <span><span class="co">#&gt; </span></span>
 <span><span class="co">#&gt; $tls</span></span>
 <span><span class="co">#&gt; [1] TRUE</span></span></code></pre></div>
-<p><code><a href="reference/yaml_emit.html">yaml_emit()</a></code> goes the other way. Note the quoting: <code>"42"</code> is a string in R, so it stays a string in YAML and on the way back.</p>
+<p><code><a href="reference/yaml_emit.html">yaml_emit()</a></code> goes the other way. Note the quoting: <code>"42"</code> is a string in R, so it stays a string in YAML and on the way back. The same holds for the cases that are easy to get wrong — line breaks, leading and trailing whitespace, mapping keys, whole-numbered doubles — so what you emit parses back to what you had.</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/cat.html" class="external-link">cat</a></span><span class="op">(</span><span class="fu"><a href="reference/yaml_emit.html">yaml_emit</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>version <span class="op">=</span> <span class="st">"42"</span>, ratio <span class="op">=</span> <span class="fl">0.5</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt; version: "42"</span></span>
@@ -100,6 +100,69 @@
 <span><span class="co">#&gt; [[2]]$a</span></span>
 <span><span class="co">#&gt; [1] 2</span></span></code></pre></div>
 <p>The <a href="https://pedrobtz.github.io/zuyaml/articles/zuyaml.html">getting started article</a> documents the conversion rules in full, including the cases that do not round-trip.</p>
+</div>
+<div class="section level2">
+<h2 id="testing">Testing<a class="anchor" aria-label="anchor" href="#testing"></a>
+</h2>
+<ul>
+<li>
+<strong><code>tests/testthat/</code></strong> runs a curated 84-case <a href="https://github.com/yaml/yaml-test-suite" class="external-link">yaml-test-suite</a> subset in every <code>R CMD check</code>; <code>ZUYAML_TEST_SUITE</code> points it at a full 402-case checkout instead.</li>
+<li>
+<strong><code>tools/conformance.R</code></strong> walks the same corpus but <em>reports</em> rather than asserts — counts per boundary, failures named, against a baseline pinned in the script.</li>
+<li>The split is deliberate: a test cannot hold a number like <code>278/279</code> that is meant to change deliberately rather than break a build.</li>
+</ul>
+<table class="table">
+<colgroup>
+<col width="25%">
+<col width="25%">
+<col width="25%">
+<col width="25%">
+</colgroup>
+<thead><tr>
+<th>Workflow</th>
+<th>Jobs, and what they do</th>
+<th>When</th>
+<th>Runs</th>
+</tr></thead>
+<tbody>
+<tr>
+<td><a href=".github/workflows/R-CMD-check.yaml"><code>R-CMD-check.yaml</code></a></td>
+<td>
+<code>R CMD check --as-cran</code> on macOS, Windows and Ubuntu at R release, devel and oldrel-1, plus Ubuntu with Clang — the package vendors C11, so both Linux compilers matter</td>
+<td>push, PR</td>
+<td><a href="https://github.com/pedrobtz/zuyaml/actions/workflows/R-CMD-check.yaml" class="external-link">view</a></td>
+</tr>
+<tr>
+<td><a href=".github/workflows/hardening.yaml"><code>hardening.yaml</code></a></td>
+<td>
+<code>full-test-suite</code> — all 402 yaml-test-suite cases, then <code>tools/conformance.R</code> against its pinned baseline. <code>fuzz</code> — the wrapper fuzzer at 20,000 iterations</td>
+<td>push, PR, weekly</td>
+<td><a href="https://github.com/pedrobtz/zuyaml/actions/workflows/hardening.yaml" class="external-link">view</a></td>
+</tr>
+<tr>
+<td><a href=".github/workflows/native-checks.yaml"><code>native-checks.yaml</code></a></td>
+<td>
+<code>sanitizers</code> — UBSan on a runner, ASan in the <code>clang-asan</code> and <code>gcc-asan</code> images. <code>valgrind</code>, <code>lto</code>, <code>rchk</code> (failing on findings), and <code>gctorture</code> at step 500 on every push with the sensitive step-20 run weekly</td>
+<td>push, PR, weekly</td>
+<td><a href="https://github.com/pedrobtz/zuyaml/actions/workflows/native-checks.yaml" class="external-link">view</a></td>
+</tr>
+<tr>
+<td><a href=".github/workflows/coverage.yaml"><code>coverage.yaml</code></a></td>
+<td>
+<code>covr</code>, with a per-file breakdown in the job summary</td>
+<td>push, PR</td>
+<td><a href="https://github.com/pedrobtz/zuyaml/actions/workflows/coverage.yaml" class="external-link">view</a></td>
+</tr>
+<tr>
+<td><a href=".github/workflows/rhub.yaml"><code>rhub.yaml</code></a></td>
+<td>R-hub platform flavours the four above do not cover — <code>s390x</code> (big-endian), <code>nold</code> (no long double), <code>nosuggests</code>
+</td>
+<td>manual</td>
+<td><a href="https://github.com/pedrobtz/zuyaml/actions/workflows/rhub.yaml" class="external-link">view</a></td>
+</tr>
+</tbody>
+</table>
+<p>Everything in <code>native-checks.yaml</code> comes from <a href="https://github.com/pedrobtz/r-actions" class="external-link">r-actions</a> rather than a second copy kept here.</p>
 </div>
 </div>
   </main><aside class="col-md-3"><div class="links">
@@ -138,8 +201,6 @@
 <h2 data-toc-skip>Dev status</h2>
 <ul class="list-unstyled">
 <li><a href="https://lifecycle.r-lib.org/articles/stages.html#experimental" class="external-link"><img src="https://img.shields.io/badge/lifecycle-experimental-orange.svg" alt="Lifecycle: experimental"></a></li>
-<li><a href="https://github.com/pedrobtz/zuyaml/actions/workflows/R-CMD-check.yaml" class="external-link"><img src="https://github.com/pedrobtz/zuyaml/actions/workflows/R-CMD-check.yaml/badge.svg" alt="R-CMD-check"></a></li>
-<li><a href="https://github.com/pedrobtz/zuyaml/actions/workflows/coverage.yaml" class="external-link"><img src="https://raw.githubusercontent.com/pedrobtz/zuyaml/main/.github/badges/coverage.svg" alt="coverage"></a></li>
 </ul>
 </div>
 

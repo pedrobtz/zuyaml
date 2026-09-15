@@ -409,6 +409,39 @@ position, so callers never have to match on message text.</p>
 <span><span class="co">#&gt; [1] 2</span></span>
 <span><span class="va">err</span><span class="op">$</span><span class="va">column</span></span>
 <span><span class="co">#&gt; [1] 1</span></span></code></pre></div>
+<div class="section level3">
+<h3 id="numbers-at-the-edges">Numbers at the edges<a class="anchor" aria-label="anchor" href="#numbers-at-the-edges"></a>
+</h3>
+<p>A number outside what a double can hold still has a well-defined
+nearest value, so it is converted rather than refused or turned into
+text. One extreme value does not change the type of a field:</p>
+<div class="sourceCode" id="cb25"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/str.html" class="external-link">str</a></span><span class="op">(</span><span class="fu"><a href="../reference/yaml_parse.html">yaml_parse</a></span><span class="op">(</span><span class="st">"[1e309, -1e309, 1e-324, 1e-323]"</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">#&gt; List of 4</span></span>
+<span><span class="co">#&gt;  $ : num Inf</span></span>
+<span><span class="co">#&gt;  $ : num -Inf</span></span>
+<span><span class="co">#&gt;  $ : num 0</span></span>
+<span><span class="co">#&gt;  $ : num 9.88e-324</span></span></code></pre></div>
+<p>Text that is not a number is still text — the generosity is about
+numbers only:</p>
+<div class="sourceCode" id="cb26"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/str.html" class="external-link">str</a></span><span class="op">(</span><span class="fu"><a href="../reference/yaml_parse.html">yaml_parse</a></span><span class="op">(</span><span class="st">"[!!float abc, 1e309 and more]"</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">#&gt; List of 2</span></span>
+<span><span class="co">#&gt;  $ : chr "abc"</span></span>
+<span><span class="co">#&gt;  $ : chr "1e309 and more"</span></span></code></pre></div>
+<p>Integers are the one place this package is deliberately less
+generous. Beyond 2^53 an integer becomes a <code>zuyaml_bigint</code>
+rather than a rounded double, because a silently rounded integer in a
+configuration file is a wrong number someone will diff.
+<code>big_integers = "double"</code> opts out.</p>
+<div class="sourceCode" id="cb27"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/str.html" class="external-link">str</a></span><span class="op">(</span><span class="fu"><a href="../reference/yaml_parse.html">yaml_parse</a></span><span class="op">(</span><span class="st">"id: 9007199254740993"</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">#&gt; List of 1</span></span>
+<span><span class="co">#&gt;  $ id: 'zuyaml_bigint' chr "9007199254740993"</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/utils/str.html" class="external-link">str</a></span><span class="op">(</span><span class="fu"><a href="../reference/yaml_parse.html">yaml_parse</a></span><span class="op">(</span><span class="st">"id: 9007199254740993"</span>, big_integers <span class="op">=</span> <span class="st">"double"</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">#&gt; List of 1</span></span>
+<span><span class="co">#&gt;  $ id: num 9.01e+15</span></span></code></pre></div>
+</div>
 </div>
 <div class="section level2">
 <h2 id="what-does-not-round-trip">What does not round-trip<a class="anchor" aria-label="anchor" href="#what-does-not-round-trip"></a>
@@ -466,7 +499,8 @@ position, so callers never have to match on message text.</p>
 </tr>
 <tr class="even">
 <td><code>NA</code></td>
-<td>Emitted as <code>null</code>, parses back as <code>NULL</code>
+<td>Emitted as an explicit <code>null</code>, parses back as
+<code>NULL</code>
 </td>
 <td><strong>No</strong></td>
 </tr>
@@ -479,17 +513,27 @@ position, so callers never have to match on message text.</p>
 <td><strong>No</strong></td>
 </tr>
 <tr class="even">
-<td>Whole-numbered doubles</td>
-<td>Emit as <code>42</code>, parse back as integer</td>
-<td>Numerically</td>
-</tr>
-<tr class="odd">
 <td><code>big_integers = "double"</code></td>
 <td>Precision lost</td>
 <td>No (opt-in)</td>
 </tr>
 </tbody>
 </table>
+<p>Everything else does round-trip, including the cases that are easy to
+get wrong. Strings with a line break or with leading or trailing
+whitespace are quoted, mapping keys are treated exactly like values, and
+a whole-numbered double emits as <code>1.0</code> so that it does not
+come back as an integer:</p>
+<div class="sourceCode" id="cb28"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">x</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>notes <span class="op">=</span> <span class="st">"first line\nsecond line\n"</span>, padded <span class="op">=</span> <span class="st">"  keep me  "</span>,</span>
+<span>          ratio <span class="op">=</span> <span class="fl">2</span>, `  spaced key  ` <span class="op">=</span> <span class="fl">1L</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/cat.html" class="external-link">cat</a></span><span class="op">(</span><span class="fu"><a href="../reference/yaml_emit.html">yaml_emit</a></span><span class="op">(</span><span class="va">x</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">#&gt; notes: "first line\nsecond line\n"</span></span>
+<span><span class="co">#&gt; padded: "  keep me  "</span></span>
+<span><span class="co">#&gt; ratio: 2.0</span></span>
+<span><span class="co">#&gt; "  spaced key  ": 1</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/identical.html" class="external-link">identical</a></span><span class="op">(</span><span class="fu"><a href="../reference/yaml_parse.html">yaml_parse</a></span><span class="op">(</span><span class="fu"><a href="../reference/yaml_emit.html">yaml_emit</a></span><span class="op">(</span><span class="va">x</span><span class="op">)</span><span class="op">)</span>, <span class="va">x</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] TRUE</span></span></code></pre></div>
 <p><code>zuyaml</code> is a semantic parser, not a round-trip editor: it
 converts values, and formatting is not part of the value. Preserving
 comments and layout would need a different API built on a retained
