@@ -58,13 +58,36 @@ jobs:
   # gctorture around the conversion, error and emit paths; this runs the whole
   # suite that way, which is broader and far slower.
   #
-  # ZUYAML_FUZZ is not raised here on purpose: the fuzzer's 200 default
-  # iterations are about controlled failure, not about unprotected SEXPs, and
-  # under a GC every 20 allocations they would cost this job most of its
-  # budget while telling it nothing.
-  gctorture:
+  # Two tiers, because one setting cannot be both fast enough to run on a push
+  # and sensitive enough to be worth running at all. Measured on this package
+  # at 9c95f82, same commit, same runner image: step 20 took 82m30s and step
+  # 100 took 18m38s. That fits T = 2.6 + 1598/step minutes -- 2.6 of fixed
+  # setup, the rest torture -- which puts step 300 just under 8 minutes.
+  #
+  # The trade is sensitivity, not coverage. Every path still runs either way,
+  # and the suite still forces thousands of collections at step 300. An
+  # unprotected SEXP is only caught when a collection lands while it is live,
+  # so the wider step gives it a larger window to hide in -- which is what the
+  # weekly step-20 run is for.
+  #
+  # ZUYAML_FUZZ is not raised in either tier on purpose: the fuzzer's 200
+  # default iterations are about controlled failure, not about unprotected
+  # SEXPs, and under a forced GC they would cost most of the budget while
+  # telling us nothing.
+  gctorture-quick:
+    if: github.event_name != 'schedule'
     uses: pedrobtz/r-actions/.github/workflows/gctorture.yml@v1
     with:
+      step: 300
+      timeout-minutes: 30
+
+  # The sensitive run, weekly and on demand. 82 minutes is fine when nobody
+  # is waiting on it.
+  gctorture-deep:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    uses: pedrobtz/r-actions/.github/workflows/gctorture.yml@v1
+    with:
+      step: 20
       timeout-minutes: 180
 
   # rchk is the only thing that ever found the build_node() PROTECT bug --
