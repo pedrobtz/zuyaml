@@ -45,7 +45,8 @@ alphabet.
 
 | Check | Result |
 |---|---|
-| R-CMD-check — macOS, Windows, Ubuntu ×4 (release/devel/oldrel-1/clang) | pass |
+| R-CMD-check — macOS, Windows, Ubuntu (release/oldrel-1) | pass |
+| R-CMD-check — CRAN-like containers `clang23`, `ubuntu-clang`, `ubuntu-gcc16` | new on 2026-09-16, first run pending — these replace the old Ubuntu-Clang row, which ran a compiler several majors behind CRAN's |
 | yaml-test-suite, all 355 cases | pass — 333/333 agreement on valid vs invalid |
 | yaml-test-suite, full re-run 2026-09-14 (402 cases) | pass — 402/402 on valid vs invalid |
 | yaml-test-suite — semantics against `in.json` | 278/279, the one difference being `WZ62` and deliberate |
