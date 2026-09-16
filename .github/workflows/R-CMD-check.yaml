@@ -1,5 +1,32 @@
-# Workflow derived from https://github.com/r-lib/actions/tree/v2/examples
-# Need help debugging build failures? Start at https://github.com/r-lib/actions#where-to-find-help
+# R CMD check, on the GitHub runners and in the CRAN-like containers, via the
+# reusable workflow in pedrobtz/r-actions. That workflow carries the reasoning;
+# this file carries only what is specific to this package.
+#
+# The container half is the reason for the switch. The old matrix had an
+# Ubuntu Clang row precisely because this package vendors a C11 parser and
+# emitter, and vendored code is written against the compilers upstream tests
+# on. But that row was ubuntu-latest's clang, which still defaults to
+# __STDC_VERSION__ 201710L, where CRAN's debian-clang leg is clang 23
+# building C as -std=gnu23 with -pedantic. It was answering the right question
+# with the wrong compiler: the first report of an upstream diagnostic would
+# still have been an incoming pretest, which is a rejected submission rather
+# than a red check. The containers run CRAN's compilers and CRAN's flags.
+#
+# No paths-ignore, unlike native-checks.yaml: --as-cran checks the URLs in
+# README.md, which ships in the tarball, so a prose-only change is a real
+# change here.
+#
+# No inputs at all: the defaults are taken as they ship.
+#
+#   - The runners matrix has no R-devel Linux row, which the old one did. It
+#     is not missed -- the containers are R-devel on Linux already, on CRAN's
+#     own compilers, and pinning R-devel to the runner's own GCC matches no
+#     CRAN flavor. Add it back only as insurance against a stale image.
+#   - No --compact-vignettes. The old build_args asked for it, but there is
+#     nothing to compact: vignettes/articles is .Rbuildignore'd and DESCRIPTION
+#     declares no VignetteBuilder, so no vignette ships in the tarball. The
+#     articles are built by pkgdown.yaml, which is the only thing that knits
+#     them.
 on:
   push:
     branches: [main, master, develop]
@@ -11,49 +38,4 @@ permissions: read-all
 
 jobs:
   R-CMD-check:
-    runs-on: ${{ matrix.config.os }}
-
-    name: ${{ matrix.config.os }} (${{ matrix.config.r }}${{ matrix.config.cc && format(', {0}', matrix.config.cc) || '' }})
-
-    strategy:
-      fail-fast: false
-      matrix:
-        config:
-          - {os: macos-latest,   r: 'release'}
-          - {os: windows-latest, r: 'release'}
-          - {os: ubuntu-latest,   r: 'devel', http-user-agent: 'release'}
-          - {os: ubuntu-latest,   r: 'release'}
-          - {os: ubuntu-latest,   r: 'oldrel-1'}
-          # The package vendors a C11 library, so both Linux compilers matter.
-          # Ubuntu defaults to GCC; this entry covers Clang.
-          - {os: ubuntu-latest,   r: 'release', cc: 'clang'}
-
-    env:
-      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
-      R_KEEP_PKG_SOURCE: yes
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Build with Clang
-        if: matrix.config.cc == 'clang'
-        run: |
-          mkdir -p ~/.R
-          printf 'CC=clang\nCFLAGS=-Wall -Wextra -pedantic -g -O2\n' >> ~/.R/Makevars
-
-      - uses: r-lib/actions/setup-pandoc@v2
-
-      - uses: r-lib/actions/setup-r@v2
-        with:
-          r-version: ${{ matrix.config.r }}
-          http-user-agent: ${{ matrix.config.http-user-agent }}
-
-      - uses: r-lib/actions/setup-r-dependencies@v2
-        with:
-          extra-packages: any::rcmdcheck
-          needs: check
-
-      - uses: r-lib/actions/check-r-package@v2
-        with:
-          upload-snapshots: true
-          build_args: 'c("--no-manual","--compact-vignettes=gs+qpdf")'
+    uses: pedrobtz/r-actions/.github/workflows/r-cmd-check.yml@v1
