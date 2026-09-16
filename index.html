@@ -128,7 +128,7 @@
 <tr>
 <td><a href=".github/workflows/R-CMD-check.yaml"><code>R-CMD-check.yaml</code></a></td>
 <td>
-<code>R CMD check --as-cran</code> on macOS, Windows and Ubuntu at R release, devel and oldrel-1, plus Ubuntu with Clang — the package vendors C11, so both Linux compilers matter</td>
+<code>R CMD check --as-cran</code> on macOS, Windows and Ubuntu at R release and oldrel-1, and in the CRAN-like containers <code>clang23</code>, <code>ubuntu-clang</code> and <code>ubuntu-gcc16</code> — the package vendors C11, so the compiler CRAN uses is the one that has to see it</td>
 <td>push, PR</td>
 <td><a href="https://github.com/pedrobtz/zuyaml/actions/workflows/R-CMD-check.yaml" class="external-link">view</a></td>
 </tr>
@@ -162,7 +162,7 @@
 </tr>
 </tbody>
 </table>
-<p>Everything in <code>native-checks.yaml</code> comes from <a href="https://github.com/pedrobtz/r-actions" class="external-link">r-actions</a> rather than a second copy kept here.</p>
+<p><code>R-CMD-check.yaml</code>, <code>native-checks.yaml</code> and <code>coverage.yaml</code> call the reusable workflows in <a href="https://github.com/pedrobtz/r-actions" class="external-link">r-actions</a> rather than keeping a second copy here. <code>hardening.yaml</code> does not: it holds the two checks that are specific to this package.</p>
 </div>
 </div>
   </main><aside class="col-md-3"><div class="links">
