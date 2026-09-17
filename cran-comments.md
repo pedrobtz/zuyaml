@@ -41,10 +41,23 @@ Two modifications were made, both documented in `inst/COPYRIGHTS` and
 ## Test environments
 
 * local macOS 26.6 (arm64), R 4.6.1
-* GitHub Actions: ubuntu-latest (R release, R devel, R oldrel-1, and clang),
-  macOS-latest (R release), windows-latest (R release)
 * win-builder (R devel and R release)
+* GitHub Actions runners: ubuntu-latest (R release and R oldrel-1),
+  macOS-latest (R release), windows-latest (R release)
+* GitHub Actions, R-hub containers on R devel: `clang23`, `ubuntu-clang` and
+  `ubuntu-gcc16`, compiled as the corresponding CRAN flavors do -- C built as
+  `-std=gnu23` with `-pedantic` rather than at the images' own defaults. The
+  package bundles a C library, so the two r-devel Debian flavors are checked
+  on their own compilers rather than on a runner's older ones.
 
 The package is also checked under AddressSanitizer and UndefinedBehaviorSanitizer,
-and fuzzed with random bytes, YAML-syntax fragments and truncated documents,
-since it parses untrusted input.
+under valgrind, with gctorture, and with rchk, and it is fuzzed with random
+bytes, YAML-syntax fragments and truncated documents, since it parses untrusted
+input.
+
+## Method references
+
+There are no published references describing the methods in this package. It
+implements the YAML 1.2 specification (<https://yaml.org/spec/1.2.2/>), which is
+cited in the DESCRIPTION, and the bundled 'cyaml' library implements the parser
+and emitter.
