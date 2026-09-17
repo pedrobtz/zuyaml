@@ -39,3 +39,18 @@ permissions: read-all
 jobs:
   R-CMD-check:
     uses: pedrobtz/r-actions/.github/workflows/r-cmd-check.yml@v1
+    with:
+      # CRAN's two configuration flavors, both off by default upstream.
+      #
+      # nosuggests because this package declares five suggested packages and
+      # its whole test suite runs on two of them. CRAN runs that flavor, and
+      # what it catches is a test file or example that treats a Suggests as if
+      # it were a hard dependency -- which errors there and passes in every
+      # other job here.
+      #
+      # nold because the package converts text to numbers and back, and that
+      # is exactly the code that can be correct only by accident of 80-bit
+      # intermediates: parsing a float, deciding whether a double is
+      # integral, and emitting one so that it parses back unchanged.
+      nosuggests: true
+      nold: true

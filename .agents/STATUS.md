@@ -56,7 +56,7 @@ alphabet.
 | Numeric extremes vs `zujson`'s stated rule | pass, **after fixing a fifth defect it found** |
 | Fuzzing — random bytes, syntax fragments, truncation | pass at 15,000 iterations each |
 | valgrind, LTO, `gctorture`, **rchk** | pass — now automatic on every push via `native-checks.yaml`, not a manual R-hub dispatch |
-| R-hub — nold, and the on-demand flavours | pass; `c23`, `intel` and `noremap` were run on 2026-09-08 and are since **deprecated upstream** |
+| R-hub — nold, and the on-demand flavours | last run 2026-09-08, then retired: `rhub.yaml` was removed on 2026-09-17, so `s390x` (big-endian), `nold` and `nosuggests` are no longer checked anywhere. `c23`, `intel` and `noremap` had already been deprecated upstream |
 | **ASan + UBSan** | **clean**, 2026-09-14 — the whole test suite and the full corpus |
 | Unwind safety — 8 poisoning loops, `gctorture` | pass, and now asserted |
 | CI arrangement | the generic native checks moved to `pedrobtz/r-actions@v1`; `hardening.yaml` keeps only what is specific to this package |

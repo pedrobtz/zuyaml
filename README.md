@@ -6,7 +6,6 @@
 [![hardening](https://github.com/pedrobtz/zuyaml/actions/workflows/hardening.yaml/badge.svg)](https://github.com/pedrobtz/zuyaml/actions/workflows/hardening.yaml)
 [![native-checks](https://github.com/pedrobtz/zuyaml/actions/workflows/native-checks.yaml/badge.svg)](https://github.com/pedrobtz/zuyaml/actions/workflows/native-checks.yaml)
 [![pkgdown](https://github.com/pedrobtz/zuyaml/actions/workflows/pkgdown.yaml/badge.svg)](https://github.com/pedrobtz/zuyaml/actions/workflows/pkgdown.yaml)
-[![R-hub](https://github.com/pedrobtz/zuyaml/actions/workflows/rhub.yaml/badge.svg)](https://github.com/pedrobtz/zuyaml/actions/workflows/rhub.yaml)
 [![coverage](https://raw.githubusercontent.com/pedrobtz/zuyaml/main/.github/badges/coverage.svg)](https://github.com/pedrobtz/zuyaml/actions/workflows/coverage.yaml)
 <!-- badges: end -->
 
@@ -90,7 +89,6 @@ conversion rules in full, including the cases that do not round-trip.
 | [`hardening.yaml`](https://github.com/pedrobtz/zuyaml/blob/main/.github/workflows/hardening.yaml) | `full-test-suite` — all 402 yaml-test-suite cases, then `tools/conformance.R` against its pinned baseline. `fuzz` — the wrapper fuzzer at 20,000 iterations | push, PR, weekly | [view](https://github.com/pedrobtz/zuyaml/actions/workflows/hardening.yaml) |
 | [`native-checks.yaml`](https://github.com/pedrobtz/zuyaml/blob/main/.github/workflows/native-checks.yaml) | `sanitizers` — UBSan on a runner, ASan in the `clang-asan` and `gcc-asan` images. `valgrind`, `lto`, `rchk` (failing on findings), and `gctorture` at step 500 on every push with the sensitive step-20 run weekly | push, PR, weekly | [view](https://github.com/pedrobtz/zuyaml/actions/workflows/native-checks.yaml) |
 | [`coverage.yaml`](https://github.com/pedrobtz/zuyaml/blob/main/.github/workflows/coverage.yaml) | `covr`, with a per-file breakdown in the job summary | push, PR | [view](https://github.com/pedrobtz/zuyaml/actions/workflows/coverage.yaml) |
-| [`rhub.yaml`](https://github.com/pedrobtz/zuyaml/blob/main/.github/workflows/rhub.yaml) | R-hub platform flavours the four above do not cover — `s390x` (big-endian), `nold` (no long double), `nosuggests` | manual | [view](https://github.com/pedrobtz/zuyaml/actions/workflows/rhub.yaml) |
 
 `R-CMD-check.yaml`, `native-checks.yaml` and `coverage.yaml` call the reusable
 workflows in [r-actions](https://github.com/pedrobtz/r-actions) rather than
