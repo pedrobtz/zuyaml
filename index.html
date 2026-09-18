@@ -11,8 +11,8 @@
 <script src="deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
 <script src="deps/headroom-0.11.0/headroom.min.js"></script><script src="deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="deps/search-1.0.0/fuse.min.js"></script><script src="deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="pkgdown.js"></script><meta property="og:title" content="Parse and Emit YAML 1.2">
-<meta name="description" content="Converts between YAML 1.2 and ordinary R objects using a bundled copy of the cyaml C11 parser and emitter, so there is no system dependency and no runtime dependency beyond R itself. Ambiguous YAML features are handled strictly and predictably: duplicate keys are refused by default, the YAML 1.2 core schema is followed so that yes and no resolve as strings, and integers beyond double precision are preserved rather than silently rounded. A stream of documents and a sequence are different things, and the interface keeps them apart. Input size, nesting depth and the number of values materialised are all bounded, which makes the parser usable on untrusted input.">
-<meta property="og:description" content="Converts between YAML 1.2 and ordinary R objects using a bundled copy of the cyaml C11 parser and emitter, so there is no system dependency and no runtime dependency beyond R itself. Ambiguous YAML features are handled strictly and predictably: duplicate keys are refused by default, the YAML 1.2 core schema is followed so that yes and no resolve as strings, and integers beyond double precision are preserved rather than silently rounded. A stream of documents and a sequence are different things, and the interface keeps them apart. Input size, nesting depth and the number of values materialised are all bounded, which makes the parser usable on untrusted input.">
+<meta name="description" content="Converts between YAML 1.2 (&lt;https://yaml.org/spec/1.2.2/&gt;) and ordinary R objects using a bundled copy of the cyaml C11 parser and emitter (&lt;https://github.com/andrewmd5/cyaml&gt;), so there is no system dependency and no runtime dependency beyond R itself. Ambiguous YAML features are handled strictly and predictably: duplicate keys are refused by default, the YAML 1.2 core schema is followed so that yes and no resolve as strings, and integers beyond double precision are preserved rather than silently rounded. A stream of documents and a sequence are different things, and the interface keeps them apart. Input size, nesting depth and the number of values materialised are all bounded, which makes the parser usable on untrusted input.">
+<meta property="og:description" content="Converts between YAML 1.2 (&lt;https://yaml.org/spec/1.2.2/&gt;) and ordinary R objects using a bundled copy of the cyaml C11 parser and emitter (&lt;https://github.com/andrewmd5/cyaml&gt;), so there is no system dependency and no runtime dependency beyond R itself. Ambiguous YAML features are handled strictly and predictably: duplicate keys are refused by default, the YAML 1.2 core schema is followed so that yes and no resolve as strings, and integers beyond double precision are preserved rather than silently rounded. A stream of documents and a sequence are different things, and the interface keeps them apart. Input size, nesting depth and the number of values materialised are all bounded, which makes the parser usable on untrusted input.">
 </head>
 <body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
@@ -62,8 +62,10 @@
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
 </h2>
-<p>Install the development version from GitHub:</p>
 <div class="sourceCode" id="cb1"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/install.packages.html" class="external-link">install.packages</a></span><span class="op">(</span><span class="st">"zuyaml"</span><span class="op">)</span></span></code></pre></div>
+<p>Or the development version from GitHub:</p>
+<div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># install.packages("pak")</span></span>
 <span><span class="fu">pak</span><span class="fu">::</span><span class="fu"><a href="https://pak.r-lib.org/reference/pak.html" class="external-link">pak</a></span><span class="op">(</span><span class="st">"pedrobtz/zuyaml"</span><span class="op">)</span></span></code></pre></div>
 </div>
@@ -71,7 +73,7 @@
 <h2 id="usage">Usage<a class="anchor" aria-label="anchor" href="#usage"></a>
 </h2>
 <p><code><a href="reference/yaml_parse.html">yaml_parse()</a></code> turns YAML text into R objects:</p>
-<div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/pedrobtz/zuyaml" class="external-link">zuyaml</a></span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/yaml_parse.html">yaml_parse</a></span><span class="op">(</span><span class="st">"host: localhost\nport: 8080\ntls: true\n"</span><span class="op">)</span></span>
@@ -84,12 +86,12 @@
 <span><span class="co">#&gt; $tls</span></span>
 <span><span class="co">#&gt; [1] TRUE</span></span></code></pre></div>
 <p><code><a href="reference/yaml_emit.html">yaml_emit()</a></code> goes the other way. Note the quoting: <code>"42"</code> is a string in R, so it stays a string in YAML and on the way back. The same holds for the cases that are easy to get wrong — line breaks, leading and trailing whitespace, mapping keys, whole-numbered doubles — so what you emit parses back to what you had.</p>
-<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/cat.html" class="external-link">cat</a></span><span class="op">(</span><span class="fu"><a href="reference/yaml_emit.html">yaml_emit</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>version <span class="op">=</span> <span class="st">"42"</span>, ratio <span class="op">=</span> <span class="fl">0.5</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt; version: "42"</span></span>
 <span><span class="co">#&gt; ratio: 0.5</span></span></code></pre></div>
 <p>Both have an <code>_all</code> variant for a YAML <em>stream</em> — several documents separated by <code>---</code>, which is a different thing from a sequence — and <code><a href="reference/yaml_read.html">yaml_read()</a></code> / <code><a href="reference/yaml_read.html">yaml_write()</a></code> do the same for files:</p>
-<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="reference/yaml_parse.html">yaml_parse_all</a></span><span class="op">(</span><span class="st">"a: 1\n---\na: 2\n"</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [[1]]</span></span>
 <span><span class="co">#&gt; [[1]]$a</span></span>
@@ -126,39 +128,32 @@
 </tr></thead>
 <tbody>
 <tr>
-<td><a href=".github/workflows/R-CMD-check.yaml"><code>R-CMD-check.yaml</code></a></td>
+<td><a href="https://github.com/pedrobtz/zuyaml/blob/main/.github/workflows/R-CMD-check.yaml" class="external-link"><code>R-CMD-check.yaml</code></a></td>
 <td>
 <code>R CMD check --as-cran</code> on macOS, Windows and Ubuntu at R release and oldrel-1, and in the CRAN-like containers <code>clang23</code>, <code>ubuntu-clang</code> and <code>ubuntu-gcc16</code> — the package vendors C11, so the compiler CRAN uses is the one that has to see it</td>
 <td>push, PR</td>
 <td><a href="https://github.com/pedrobtz/zuyaml/actions/workflows/R-CMD-check.yaml" class="external-link">view</a></td>
 </tr>
 <tr>
-<td><a href=".github/workflows/hardening.yaml"><code>hardening.yaml</code></a></td>
+<td><a href="https://github.com/pedrobtz/zuyaml/blob/main/.github/workflows/hardening.yaml" class="external-link"><code>hardening.yaml</code></a></td>
 <td>
 <code>full-test-suite</code> — all 402 yaml-test-suite cases, then <code>tools/conformance.R</code> against its pinned baseline. <code>fuzz</code> — the wrapper fuzzer at 20,000 iterations</td>
 <td>push, PR, weekly</td>
 <td><a href="https://github.com/pedrobtz/zuyaml/actions/workflows/hardening.yaml" class="external-link">view</a></td>
 </tr>
 <tr>
-<td><a href=".github/workflows/native-checks.yaml"><code>native-checks.yaml</code></a></td>
+<td><a href="https://github.com/pedrobtz/zuyaml/blob/main/.github/workflows/native-checks.yaml" class="external-link"><code>native-checks.yaml</code></a></td>
 <td>
 <code>sanitizers</code> — UBSan on a runner, ASan in the <code>clang-asan</code> and <code>gcc-asan</code> images. <code>valgrind</code>, <code>lto</code>, <code>rchk</code> (failing on findings), and <code>gctorture</code> at step 500 on every push with the sensitive step-20 run weekly</td>
 <td>push, PR, weekly</td>
 <td><a href="https://github.com/pedrobtz/zuyaml/actions/workflows/native-checks.yaml" class="external-link">view</a></td>
 </tr>
 <tr>
-<td><a href=".github/workflows/coverage.yaml"><code>coverage.yaml</code></a></td>
+<td><a href="https://github.com/pedrobtz/zuyaml/blob/main/.github/workflows/coverage.yaml" class="external-link"><code>coverage.yaml</code></a></td>
 <td>
 <code>covr</code>, with a per-file breakdown in the job summary</td>
 <td>push, PR</td>
 <td><a href="https://github.com/pedrobtz/zuyaml/actions/workflows/coverage.yaml" class="external-link">view</a></td>
-</tr>
-<tr>
-<td><a href=".github/workflows/rhub.yaml"><code>rhub.yaml</code></a></td>
-<td>R-hub platform flavours the four above do not cover — <code>s390x</code> (big-endian), <code>nold</code> (no long double), <code>nosuggests</code>
-</td>
-<td>manual</td>
-<td><a href="https://github.com/pedrobtz/zuyaml/actions/workflows/rhub.yaml" class="external-link">view</a></td>
 </tr>
 </tbody>
 </table>
@@ -201,6 +196,11 @@
 <h2 data-toc-skip>Dev status</h2>
 <ul class="list-unstyled">
 <li><a href="https://lifecycle.r-lib.org/articles/stages.html#experimental" class="external-link"><img src="https://img.shields.io/badge/lifecycle-experimental-orange.svg" alt="Lifecycle: experimental"></a></li>
+<li><a href="https://github.com/pedrobtz/zuyaml/actions/workflows/R-CMD-check.yaml" class="external-link"><img src="https://github.com/pedrobtz/zuyaml/actions/workflows/R-CMD-check.yaml/badge.svg" alt="R-CMD-check"></a></li>
+<li><a href="https://github.com/pedrobtz/zuyaml/actions/workflows/hardening.yaml" class="external-link"><img src="https://github.com/pedrobtz/zuyaml/actions/workflows/hardening.yaml/badge.svg" alt="hardening"></a></li>
+<li><a href="https://github.com/pedrobtz/zuyaml/actions/workflows/native-checks.yaml" class="external-link"><img src="https://github.com/pedrobtz/zuyaml/actions/workflows/native-checks.yaml/badge.svg" alt="native-checks"></a></li>
+<li><a href="https://github.com/pedrobtz/zuyaml/actions/workflows/pkgdown.yaml" class="external-link"><img src="https://github.com/pedrobtz/zuyaml/actions/workflows/pkgdown.yaml/badge.svg" alt="pkgdown"></a></li>
+<li><a href="https://github.com/pedrobtz/zuyaml/actions/workflows/coverage.yaml" class="external-link"><img src="https://raw.githubusercontent.com/pedrobtz/zuyaml/main/.github/badges/coverage.svg" alt="coverage"></a></li>
 </ul>
 </div>
 
