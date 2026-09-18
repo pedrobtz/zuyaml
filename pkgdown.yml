@@ -4,7 +4,7 @@ pkgdown_sha: ~
 articles:
   articles/kubernetes-crd: kubernetes-crd.html
   articles/zuyaml: zuyaml.html
-last_built: 2026-09-18T12:48Z
+last_built: 2026-09-18T13:01Z
 urls:
   reference: https://pedrobtz.github.io/zuyaml/reference
   article: https://pedrobtz.github.io/zuyaml/articles
