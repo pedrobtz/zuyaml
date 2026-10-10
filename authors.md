@@ -10,7 +10,7 @@
 ## Citation
 
 Source:
-[`DESCRIPTION`](https://github.com/pedrobtz/zuyaml/blob/main/DESCRIPTION)
+[`DESCRIPTION`](https://github.com/pedrobtz/zuyaml/blob/0.1.0/DESCRIPTION)
 
 Baltazar P (2026). *zuyaml: Parse and Emit 'YAML' 1.2*. R package
 version 0.1.0, <https://github.com/pedrobtz/zuyaml>.

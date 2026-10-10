@@ -2,6 +2,8 @@
 
 ## zuyaml 0.1.0
 
+CRAN release: 2026-10-07
+
 First release. The API is complete and the package is well tested, but
 it is **not frozen**: names, defaults and return types may still change.
 Pin the version if you depend on it.
