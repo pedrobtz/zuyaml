@@ -1,6 +1,7 @@
 # zuyaml
 
 <!-- badges: start -->
+[![CRAN status](https://www.r-pkg.org/badges/version/zuyaml)](https://CRAN.R-project.org/package=zuyaml)
 [![Lifecycle: experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
 [![R-CMD-check](https://github.com/pedrobtz/zuyaml/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pedrobtz/zuyaml/actions/workflows/R-CMD-check.yaml)
 [![hardening](https://github.com/pedrobtz/zuyaml/actions/workflows/hardening.yaml/badge.svg)](https://github.com/pedrobtz/zuyaml/actions/workflows/hardening.yaml)
