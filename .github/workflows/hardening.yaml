@@ -12,12 +12,12 @@
 # sanitizer jobs that used to be in this file are three of those.
 
 on:
-  push:
-    branches: [main, master, develop]
+  # No `push:`: a pull request already checks its merge with main,
+  # and the schedule checks main (r-actions README, "Pushes to main").
   pull_request:
   schedule:
     # Weekly, so that a latent problem surfaces without waiting for a push.
-    - cron: "0 4 * * 1"
+    - cron: "28 5 * * 1"
   workflow_dispatch:
 
 name: hardening.yaml
