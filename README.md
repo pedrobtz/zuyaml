@@ -7,7 +7,7 @@
 [![hardening](https://github.com/pedrobtz/zuyaml/actions/workflows/hardening.yaml/badge.svg)](https://github.com/pedrobtz/zuyaml/actions/workflows/hardening.yaml)
 [![native-checks](https://github.com/pedrobtz/zuyaml/actions/workflows/native-checks.yaml/badge.svg)](https://github.com/pedrobtz/zuyaml/actions/workflows/native-checks.yaml)
 [![pkgdown](https://github.com/pedrobtz/zuyaml/actions/workflows/pkgdown.yaml/badge.svg)](https://github.com/pedrobtz/zuyaml/actions/workflows/pkgdown.yaml)
-[![coverage](https://raw.githubusercontent.com/pedrobtz/zuyaml/main/.github/badges/coverage.svg)](https://github.com/pedrobtz/zuyaml/actions/workflows/coverage.yaml)
+[![coverage](https://raw.githubusercontent.com/pedrobtz/zuyaml/gh-pages/badges/coverage.svg)](https://github.com/pedrobtz/zuyaml/actions/workflows/coverage.yaml)
 <!-- badges: end -->
 
 zuyaml converts between YAML 1.2 and ordinary R objects, using a bundled copy of
