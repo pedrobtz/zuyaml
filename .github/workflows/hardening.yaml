@@ -17,7 +17,7 @@ on:
   pull_request:
   schedule:
     # Weekly, so that a latent problem surfaces without waiting for a push.
-    - cron: "28 5 * * 1"
+    - cron: "28 5 * * 6"  # weekly, Saturdays
   workflow_dispatch:
 
 name: hardening.yaml
