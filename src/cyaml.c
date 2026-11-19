@@ -1326,6 +1326,8 @@ CYAML_API const char* cyaml_strerror(cyaml_err_t err)
         return "Duplicate key";
     case CYAML_ERR_IO:
         return "I/O error";
+    case CYAML_ERR_DEPTH:
+        return "Nesting too deep";
     default:
         return "Unknown error";
     }

@@ -109,6 +109,7 @@ typedef enum {
     SYNERR_EMPTY_FLOW_ENTRY,
     SYNERR_EXPECTED_FLOW_SEQ_SEP,
     SYNERR_EXPECTED_FLOW_MAP_SEP,
+    SYNERR_FLOW_TOO_DEEP,
 } synerr_t;
 
 static const char* synerr_msg(synerr_t e)
@@ -186,6 +187,8 @@ static const char* synerr_msg(synerr_t e)
         return "Expected ',' or ']'";
     case SYNERR_EXPECTED_FLOW_MAP_SEP:
         return "Expected ',' or '}'";
+    case SYNERR_FLOW_TOO_DEEP:
+        return "Flow nesting exceeds max_depth";
     }
     return "Unknown error";
 }
@@ -213,6 +216,7 @@ typedef struct {
     size_t simple_key_top;
 
     int flow_level;
+    uint32_t max_depth; /* zuyaml patch: opts.max_depth, 0 = unlimited */
     uint32_t flags;
     size_t adjacent_value_allowed_at;
 
@@ -299,7 +303,9 @@ inline static void skip_comment(scanner_t* s)
 static void set_synerr(scanner_t* s, synerr_t err)
 {
     if (s->err) {
-        s->err->code = (err == SYNERR_NOMEM) ? CYAML_ERR_NOMEM : CYAML_ERR_SYNTAX;
+        s->err->code = (err == SYNERR_NOMEM) ? CYAML_ERR_NOMEM
+            : (err == SYNERR_FLOW_TOO_DEEP) ? CYAML_ERR_DEPTH
+                                           : CYAML_ERR_SYNTAX;
         s->err->span.start_line = s->line;
         s->err->span.start_col = s->col;
         snprintf(s->err->msg, sizeof(s->err->msg), "%s", synerr_msg(err));
@@ -493,6 +499,14 @@ static bool remove_simple_key(scanner_t* s)
 
 static bool increase_flow_level(scanner_t* s)
 {
+    /* zuyaml patch: stale_simple_keys() walks one entry per open flow level on
+       every token, so scanning costs O(tokens x flow depth). Unbounded, a few
+       hundred kilobytes of '[' hold the parser for minutes. Honour max_depth
+       here, before the cost is paid. */
+    if (s->max_depth > 0 && (uint32_t)s->flow_level >= s->max_depth) {
+        set_synerr(s, SYNERR_FLOW_TOO_DEEP);
+        return false;
+    }
     if (s->simple_key_top >= s->simple_keys_cap) {
         if (!grow_simple_keys(s))
             return false;
@@ -2752,7 +2766,7 @@ CYAML_API cyaml_doc_t* cyaml_parse(const char* src, size_t len,
     }
 
     scanner_t scanner = {
-        .src = src, .len = len, .pos = 0, .line = 1, 1, .tokens = NULL, .tok_cap = 0, .tok_head = 0, .tok_tail = 0, .tokens_parsed = 0, .indents = NULL, .indents_cap = 0, .indent_top = 0, .indent = -1, .simple_keys = NULL, .simple_keys_cap = 0, .simple_key_top = 0, .flow_level = 0, .flags = SCAN_SIMPLE_KEY_ALLOWED, .adjacent_value_allowed_at = (size_t)-1, .doc = NULL, .err = err, .spec = opts ? opts->spec : CYAML_SPEC_AUTO
+        .src = src, .len = len, .pos = 0, .line = 1, 1, .tokens = NULL, .tok_cap = 0, .tok_head = 0, .tok_tail = 0, .tokens_parsed = 0, .indents = NULL, .indents_cap = 0, .indent_top = 0, .indent = -1, .simple_keys = NULL, .simple_keys_cap = 0, .simple_key_top = 0, .flow_level = 0, .flags = SCAN_SIMPLE_KEY_ALLOWED, .adjacent_value_allowed_at = (size_t)-1, .doc = NULL, .err = err, .spec = opts ? opts->spec : CYAML_SPEC_AUTO, .max_depth = opts ? opts->max_depth : 0
     };
 
     yaml_parser_t parser = { .scanner = &scanner, .state = PARSE_STREAM_START, .states = NULL, .states_cap = 0, .state_top = 0 };
@@ -2801,7 +2815,7 @@ CYAML_API cyaml_stream_t* cyaml_parse_stream(const char* src, size_t len,
     stream->src_len = (uint32_t)len;
 
     scanner_t scanner = {
-        .src = src, .len = len, .pos = 0, .line = 1, 1, .tokens = NULL, .tok_cap = 0, .tok_head = 0, .tok_tail = 0, .tokens_parsed = 0, .indents = NULL, .indents_cap = 0, .indent_top = 0, .indent = -1, .simple_keys = NULL, .simple_keys_cap = 0, .simple_key_top = 0, .flow_level = 0, .flags = SCAN_SIMPLE_KEY_ALLOWED, .adjacent_value_allowed_at = (size_t)-1, .doc = NULL, .err = err, .spec = opts ? opts->spec : CYAML_SPEC_AUTO
+        .src = src, .len = len, .pos = 0, .line = 1, 1, .tokens = NULL, .tok_cap = 0, .tok_head = 0, .tok_tail = 0, .tokens_parsed = 0, .indents = NULL, .indents_cap = 0, .indent_top = 0, .indent = -1, .simple_keys = NULL, .simple_keys_cap = 0, .simple_key_top = 0, .flow_level = 0, .flags = SCAN_SIMPLE_KEY_ALLOWED, .adjacent_value_allowed_at = (size_t)-1, .doc = NULL, .err = err, .spec = opts ? opts->spec : CYAML_SPEC_AUTO, .max_depth = opts ? opts->max_depth : 0
     };
 
     yaml_parser_t parser = { .scanner = &scanner, .state = PARSE_STREAM_START, .states = NULL, .states_cap = 0, .state_top = 0 };

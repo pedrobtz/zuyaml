@@ -260,7 +260,8 @@ typedef enum {
     CYAML_ERR_ALIAS,
     CYAML_ERR_TAG,
     CYAML_ERR_DUP_KEY,
-    CYAML_ERR_IO
+    CYAML_ERR_IO,
+    CYAML_ERR_DEPTH /* zuyaml patch: flow nesting beyond opts.max_depth */
 } cyaml_err_t;
 
 typedef struct {
