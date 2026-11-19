@@ -451,7 +451,7 @@ static cyaml_node_t* build_bigint(cyaml_doc_t* doc, SEXP x)
     return cyaml_new_str(doc, s, n);
 }
 
-static void check_names(SEXP names, R_xlen_t n)
+static void check_names(SEXP names, const char** keys, R_xlen_t n)
 {
     R_xlen_t i, j;
 
@@ -465,14 +465,14 @@ static void check_names(SEXP names, R_xlen_t n)
         }
     }
     /* cyaml_map_set is set-or-update, so a duplicate name would silently
-       overwrite rather than produce two keys. */
+       overwrite rather than produce two keys. The translated keys are
+       compared, so the same text in two encodings is a duplicate (#32). */
     for (i = 0; i < n; i++) {
         for (j = i + 1; j < n; j++) {
-            if (strcmp(CHAR(STRING_ELT(names, i)), CHAR(STRING_ELT(names, j)))
-                == 0) {
+            if (strcmp(keys[i], keys[j]) == 0) {
                 zuyaml_stopf("duplicate_key", NULL,
                     "Cannot emit a list with duplicate names ('%s').",
-                    CHAR(STRING_ELT(names, i)));
+                    keys[i]);
             }
         }
     }
@@ -481,6 +481,7 @@ static void check_names(SEXP names, R_xlen_t n)
 static cyaml_node_t* build_map(cyaml_doc_t* doc, SEXP x, SEXP names)
 {
     R_xlen_t n = XLENGTH(x), i;
+    const char** keys;
     cyaml_node_t* map = cyaml_new_map(doc);
 
     if (map == NULL) {
@@ -492,11 +493,20 @@ static cyaml_node_t* build_map(cyaml_doc_t* doc, SEXP x, SEXP names)
     if (n == 0) {
         map->style = (cyaml_style_t)CYAML_FLOW;
     }
-    check_names(names, n);
+    /* Keys are translated to UTF-8 exactly as values are (build_element),
+       or a latin1 name was copied byte for byte into output marked UTF-8
+       (#32). Rf_translateCharUTF8() returns R_alloc memory or the CHARSXP's
+       own, both alive until .Call returns. */
+    keys = (const char**)R_alloc((size_t)(n > 0 ? n : 1), sizeof(char*));
+    for (i = 0; i < n; i++) {
+        SEXP nm = STRING_ELT(names, i);
+        keys[i] = (nm == NA_STRING) ? "" : Rf_translateCharUTF8(nm);
+    }
+    check_names(names, keys, n);
 
     for (i = 0; i < n; i++) {
         SEXP el = (TYPEOF(x) == VECSXP) ? VECTOR_ELT(x, i) : x;
-        const char* key = CHAR(STRING_ELT(names, i));
+        const char* key = keys[i];
         cyaml_node_t* val = (TYPEOF(x) == VECSXP)
             ? build_node(doc, el)
             : build_element(doc, x, i);

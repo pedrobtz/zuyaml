@@ -163,3 +163,19 @@ test_that("every string the parser resolves as non-string is quoted (#30)", {
   v <- c("-0x10", "nULL", ".iNf", "tRUE", "+0o7")
   expect_identical(unlist(yaml_parse(yaml_emit(v))), v)
 })
+
+test_that("map keys are translated to UTF-8 like values (#32)", {
+  latin1 <- iconv("café", "UTF-8", "latin1")
+  k <- list(1L)
+  names(k) <- latin1
+  out <- yaml_emit(k)
+  expect_true(validUTF8(out))
+  expect_identical(Encoding(out), "UTF-8")
+  expect_identical(names(yaml_parse(out)), "café")
+
+  # The same text in two encodings is one name, so it is a duplicate.
+  dup <- list(1L, 2L)
+  names(dup) <- c(latin1, "café")
+  err <- tryCatch(yaml_emit(dup), zuyaml_error = identity)
+  expect_identical(err$code, "duplicate_key")
+})
