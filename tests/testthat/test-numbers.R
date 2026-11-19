@@ -190,13 +190,11 @@ test_that("integers straddle every boundary the same in every base", {
 })
 
 test_that("integer near misses are strings", {
-  # A hex literal past uint64 has no decimal form to keep, so it stays text.
   for (tok in c(
     "0x",
     "0o",
     "0o8",
     "0xG",
-    "0x10000000000000000",
     "1.5",
     "1e3",
     "--1",
@@ -219,4 +217,45 @@ test_that("an approximated big integer is the nearest double", {
     yaml_parse(paste0("-", big), big_integers = "double"),
     -dbl("46293E5939A08CEA")
   )
+})
+
+test_that("integers beyond 64 bits are bigints in every base (#31)", {
+  # The same value in decimal, hex and octal, past uint64 and below -2^63:
+  # the R type must not depend on the spelling.
+  same <- list(
+    c("18446744073709551616", "0x10000000000000000",
+      "0o2000000000000000000000"),
+    c("-9223372036854775809", "-0x8000000000000001",
+      "-0o1000000000000000000001"),
+    c("-18446744073709551615", "-0xFFFFFFFFFFFFFFFF"),
+    c("340282366920938463463374607431768211456",
+      "0x100000000000000000000000000000000")
+  )
+  for (spellings in same) {
+    want <- spellings[[1]]
+    for (s in spellings) {
+      got <- yaml_parse(s)
+      expect_s3_class(got, "zuyaml_bigint")
+      expect_identical(unclass(got), want, info = s)
+      expect_identical(unclass(yaml_parse(paste("!!int", s))), want, info = s)
+      err <- tryCatch(yaml_parse(s, big_integers = "error"),
+                      zuyaml_error = identity)
+      expect_identical(err$code, "precision", info = s)
+      expect_identical(
+        yaml_parse(s, big_integers = "double"),
+        yaml_parse(want, big_integers = "double"),
+        info = s
+      )
+    }
+  }
+})
+
+test_that("decimal integers above 2^64 keep their digits (#37)", {
+  # 0.1.0 wrapped some of these modulo 2^64: 43526186596692760666 came back
+  # as "6632698449273657434", silently.
+  for (s in c("43526186596692760666", "36893488147419103233",
+              "20000000000000000000", "99999999999999999999",
+              "-43526186596692760666")) {
+    expect_identical(unclass(yaml_parse(s)), s, info = s)
+  }
 })

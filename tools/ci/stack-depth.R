@@ -16,8 +16,9 @@
 # conversion and for emitting. Its ratio to the default max_depth is the
 # actual safety margin; it must be at least 4.
 #
-# --large-output also emits a document longer than an R string can hold,
-# which must be limit_size. It needs about 4 GB of memory.
+# --large-output also emits a document longer than an R string can hold, and
+# builds one whose strings total more than that, which must both be
+# limit_size. It needs about 4 GB of memory.
 
 # The installed package, not pkgload::load_all(): pkgload does not fit in a
 # 256 KB stack. tools/ci/stack-depth.sh installs it.
@@ -101,5 +102,14 @@ if ("--large-output" %in% args) {
   got <- classify(yaml_emit(x))
   if (!identical(got, "limit_size")) fail("2.5 GB emit gave", got)
   cat("emit beyond INT_MAX bytes: limit_size\n")
+  rm(x)
+
+  # Strings whose total passes 2^31 bytes: cyaml's builder buffer used to wrap
+  # and loop forever before the output check ran (#33).
+  big <- strrep("a", 1.1e9)
+  got <- classify(yaml_emit(list(big, big)))
+  if (!identical(got, "limit_size")) fail("2.2 GB of strings gave", got)
+  rm(big)
+  cat("strings beyond INT_MAX bytes in total: limit_size\n")
 }
 cat("OK\n")

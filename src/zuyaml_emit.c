@@ -9,6 +9,7 @@
 #include <zufast/number.h>
 
 #include "zuyaml.h"
+#include "cyaml_utf8.h" /* cyaml_scan_int(), cyaml_scan_float() */
 
 /* --- unwind-safe ownership of the document being built ----------------- */
 
@@ -93,6 +94,51 @@ static bool matches(const char* s, size_t n, const char* lit)
  * read "everything else is upstream's job" into either function -- upstream
  * quotes for syntax, not for meaning, and the two are separate concerns.
  */
+static bool ascii_ieq(const char* s, size_t n, const char* lit)
+{
+    size_t i;
+
+    if (strlen(lit) != n) {
+        return false;
+    }
+    for (i = 0; i < n; i++) {
+        char c = s[i];
+        if (c >= 'A' && c <= 'Z') {
+            c = (char)(c - 'A' + 'a');
+        }
+        if (c != lit[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/*
+ * What cyaml's own resolver, cyaml_scalar_kind() in cyaml.c, reads as
+ * something other than a string, using the same functions and the same
+ * case-insensitive keyword match. The resolver is wider than the core
+ * schema: a sign before 0x and 0o, and null, true, false, .inf and .nan in
+ * any case. A copy of the core schema's narrower rules emitted "-0x10",
+ * "nULL" and ".iNf" plain, and they came back as -16L, NULL and Inf (#30).
+ * Asking the resolver's functions keeps the two in step by construction.
+ */
+static bool resolver_reads_non_string(const char* s, size_t n)
+{
+    static const char* const keywords[] = { "null", "true", "false", ".nan",
+        ".inf", "+.inf", "-.inf" };
+    size_t k;
+
+    if (n == 1 && s[0] == '~') {
+        return true;
+    }
+    for (k = 0; k < sizeof(keywords) / sizeof(keywords[0]); k++) {
+        if (ascii_ieq(s, n, keywords[k])) {
+            return true;
+        }
+    }
+    return cyaml_scan_int(s, n) || cyaml_scan_float(s, n);
+}
+
 static bool resolves_as_non_string(const char* s, size_t n)
 {
     size_t i = 0;
@@ -100,6 +146,9 @@ static bool resolves_as_non_string(const char* s, size_t n)
 
     if (n == 0) {
         return true; /* empty must be quoted or it reads as null */
+    }
+    if (resolver_reads_non_string(s, n)) {
+        return true;
     }
 
     /* null */
@@ -264,9 +313,34 @@ static cyaml_node_t* new_null_node(cyaml_doc_t* doc)
  * round trip -- either because the text would resolve as another type, or
  * because the plain style would discard part of it.
  */
+/*
+ * Refuse an append that would take the document's text past INT_MAX bytes
+ * (#33). cyaml_doc_append() sizes its buffer as uint32_t and doubles it, so
+ * past 2^31 bytes the capacity wraps to 0 and its growth loop never ends:
+ * yaml_emit() hung, uninterruptibly, before the output check below could
+ * run. INT_MAX is also all an R string holds, so nothing that could be
+ * returned is refused. The slack covers the fixed-size appends (numbers,
+ * booleans, null) that build_element() makes without a length.
+ */
+#define ZUYAML_APPEND_SLACK 64u
+
+static void builder_reserve(const cyaml_doc_t* doc, size_t len)
+{
+    if ((uint64_t)cyaml_src_len(doc) + (uint64_t)len + ZUYAML_APPEND_SLACK
+        > (uint64_t)INT_MAX) {
+        zuyaml_stopf("limit_size", NULL,
+            "The YAML being emitted exceeds what an R string can hold (%d "
+            "bytes).",
+            INT_MAX);
+    }
+}
+
 static cyaml_node_t* new_string_node(cyaml_doc_t* doc, const char* s, size_t n)
 {
-    cyaml_node_t* node = cyaml_new_str(doc, s, n);
+    cyaml_node_t* node;
+
+    builder_reserve(doc, n);
+    node = cyaml_new_str(doc, s, n);
 
     if (node != NULL
         && (resolves_as_non_string(s, n) || needs_nonplain_style(s, n))) {
@@ -350,6 +424,7 @@ static cyaml_node_t* build_double(cyaml_doc_t* doc, double v)
 
 static cyaml_node_t* build_element(cyaml_doc_t* doc, SEXP x, R_xlen_t i)
 {
+    builder_reserve(doc, 0); /* the fixed-size appends below */
     switch (TYPEOF(x)) {
     case LGLSXP:
         return LOGICAL(x)[i] == NA_LOGICAL
@@ -399,10 +474,11 @@ static cyaml_node_t* build_bigint(cyaml_doc_t* doc, SEXP x)
         zuyaml_stopf("invalid_input", NULL,
             "A zuyaml_bigint must hold a decimal integer; got '%s'.", s);
     }
+    builder_reserve(doc, n);
     return cyaml_new_str(doc, s, n);
 }
 
-static void check_names(SEXP names, R_xlen_t n)
+static void check_names(SEXP names, const char** keys, R_xlen_t n)
 {
     R_xlen_t i, j;
 
@@ -416,14 +492,14 @@ static void check_names(SEXP names, R_xlen_t n)
         }
     }
     /* cyaml_map_set is set-or-update, so a duplicate name would silently
-       overwrite rather than produce two keys. */
+       overwrite rather than produce two keys. The translated keys are
+       compared, so the same text in two encodings is a duplicate (#32). */
     for (i = 0; i < n; i++) {
         for (j = i + 1; j < n; j++) {
-            if (strcmp(CHAR(STRING_ELT(names, i)), CHAR(STRING_ELT(names, j)))
-                == 0) {
+            if (strcmp(keys[i], keys[j]) == 0) {
                 zuyaml_stopf("duplicate_key", NULL,
                     "Cannot emit a list with duplicate names ('%s').",
-                    CHAR(STRING_ELT(names, i)));
+                    keys[i]);
             }
         }
     }
@@ -432,6 +508,7 @@ static void check_names(SEXP names, R_xlen_t n)
 static cyaml_node_t* build_map(cyaml_doc_t* doc, SEXP x, SEXP names)
 {
     R_xlen_t n = XLENGTH(x), i;
+    const char** keys;
     cyaml_node_t* map = cyaml_new_map(doc);
 
     if (map == NULL) {
@@ -443,15 +520,25 @@ static cyaml_node_t* build_map(cyaml_doc_t* doc, SEXP x, SEXP names)
     if (n == 0) {
         map->style = (cyaml_style_t)CYAML_FLOW;
     }
-    check_names(names, n);
+    /* Keys are translated to UTF-8 exactly as values are (build_element),
+       or a latin1 name was copied byte for byte into output marked UTF-8
+       (#32). Rf_translateCharUTF8() returns R_alloc memory or the CHARSXP's
+       own, both alive until .Call returns. */
+    keys = (const char**)R_alloc((size_t)(n > 0 ? n : 1), sizeof(char*));
+    for (i = 0; i < n; i++) {
+        SEXP nm = STRING_ELT(names, i);
+        keys[i] = (nm == NA_STRING) ? "" : Rf_translateCharUTF8(nm);
+    }
+    check_names(names, keys, n);
 
     for (i = 0; i < n; i++) {
         SEXP el = (TYPEOF(x) == VECSXP) ? VECTOR_ELT(x, i) : x;
-        const char* key = CHAR(STRING_ELT(names, i));
+        const char* key = keys[i];
         cyaml_node_t* val = (TYPEOF(x) == VECSXP)
             ? build_node(doc, el)
             : build_element(doc, x, i);
 
+        builder_reserve(doc, strlen(key));
         if (val == NULL || !cyaml_map_set(doc, map, key, val)) {
             zuyaml_stopf("memory", NULL, "Could not build a YAML mapping.");
         }
@@ -630,7 +717,11 @@ SEXP zuyaml_emit_(SEXP x, SEXP indent, SEXP width, SEXP document_start,
     text_owner = PROTECT(text_own(text));
 
     /* An R string holds at most INT_MAX bytes. A cast would wrap, and the
-       error would be R's "negative length vectors" (#8). */
+       error would be R's "negative length vectors" (#8). builder_reserve()
+       bounds the document's text; quoting and indentation can still make the
+       output longer, so this is the check that output reaches. Its test needs
+       about 4 GB, so it runs in hardening.yaml (tools/ci/stack-depth.R
+       --large-output), not in tests/. */
     if (len > (size_t)INT_MAX) {
         zuyaml_stopf("limit_size", NULL,
             "The emitted YAML is %.0f bytes, more than an R string can hold "

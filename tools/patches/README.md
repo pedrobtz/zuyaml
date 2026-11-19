@@ -191,10 +191,15 @@ flow levels are already open. The failure gets a new error code,
 and a `cyaml_strerror()` string. `zuyaml_err_code()` maps it to
 `"limit_depth"`, the code conversion already raised.
 
-**Why it changes no result:** every collection counts towards zuyaml's depth,
-block or flow, so a document with more than `max_depth` open flow levels was
-already refused during conversion. Only the moment changes, and the condition
-now carries the line and column of the bracket that crossed the limit.
+**What it changes, and what it does not:** it accepts and refuses exactly the
+same documents. Every collection counts towards zuyaml's depth, block or flow,
+so a document with more than `max_depth` open flow levels was already refused
+during conversion. What changes is which error is reported. The scanner now
+stops first, so when a document is both too deep and wrong in another way (a
+later syntax error, an alias under `aliases = "error"`, an application tag
+under `tags = "error"`, `max_nodes`, an embedded NUL), the reported `code` is
+`limit_depth` where 0.1.0 reported the other one (#34). The condition also now
+carries the line and column of the bracket that crossed the limit.
 `max_depth = 0` disables the check, as it disables zuyaml's, and leaves the
 quadratic cost in place.
 

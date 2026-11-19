@@ -37,24 +37,25 @@ README are not reliable.
 
 ## Current state
 
-Verified 2026-11-11. 0.1.0 is on CRAN (published 2026-10-07) with the API
-complete but explicitly **not frozen**. `main` is `0.1.0.9000` with no
-changes yet in `NEWS.md`. Milestones M0–M6.6 are done. M7 (freeze to 1.0.0)
-waits on the three open questions in design §22 (key stringification, eight
-versus five functions, whether `zuyaml_bigint` and `zuyaml_map` belong in
-1.0) and on `conditionCall()`, which is still `NULL` in both layers
-(`R/conditions.R`, `src/zuyaml_error.c`). `STATUS.md` was last revised
-2026-09-14, before the release, so its release and housekeeping notes are out
-of date.
+Verified 2026-11-19. 0.1.0 is on CRAN (published 2026-10-07) with the API
+complete but explicitly **not frozen**. The release branch sets
+`Version: 0.1.1`, a bug-fix release: number conversion through zufast,
+flow-depth and C-stack bounds, and the critical review's fixes (#30–#36).
+Milestones M0–M6.6 are done. M7 (freeze to 1.0.0) waits on the open
+questions in design §22 (key stringification, eight versus five functions,
+whether `zuyaml_bigint` and `zuyaml_map` belong in 1.0) and on
+`conditionCall()`, which is still `NULL` in both layers (`R/conditions.R`,
+`src/zuyaml_error.c`). `STATUS.md` was last revised 2026-09-14, before the
+release, so its release and housekeeping notes are out of date.
 
 ## Versions and dependents
 
 The current version's parent issue is
-[#15](https://github.com/pedrobtz/zuyaml/issues/15) for `v0.1.1`; its one
-sub-issue is #14, adopting zufast for scalar number resolution. #17 is the
-reminder that the next submission opens from 2026-11-18. Sibling packages
-that depend on this one: none yet. Design §19 plans zuhttp's use of it for
-YAML response bodies.
+[#15](https://github.com/pedrobtz/zuyaml/issues/15) for `v0.1.1`, and its
+review issue is #26. #17 is the reminder that the next submission opens from
+2026-11-18. Build-time dependency: zufast (`LinkingTo:`, header-only). Sibling
+packages that depend on this one: none yet. Design §19 plans zuhttp's use of
+it for YAML response bodies.
 
 ## Commands
 

@@ -94,6 +94,9 @@ test_that("max_size is enforced by zuyaml, since cyaml ignores it", {
   expect_identical(err$code, "limit_size")
   expect_identical(yaml_parse("a: 1", max_size = 0), list(a = 1L)) # unlimited
   expect_identical(yaml_parse("a: 1", max_size = 4), list(a = 1L))
+  # limit - 1 (#36): one byte short of the 4-byte document.
+  expect_identical(error_code(yaml_parse("a: 1", max_size = 3)), "limit_size")
+  expect_identical(yaml_parse("a: 1", max_size = 5), list(a = 1L))
 })
 
 # Alias behaviour is covered in test-aliases.R.

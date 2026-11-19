@@ -85,19 +85,23 @@ test_that("zuyaml_bigint emits as an integer", {
 
   # The class attribute is not trusted: a hand-made invalid value is refused
   # rather than quietly emitted as a string.
-  expect_error(
-    yaml_emit(structure("not-a-number", class = "zuyaml_bigint")),
-    "decimal integer"
+  expect_identical(
+    error_code(yaml_emit(structure("not-a-number", class = "zuyaml_bigint"))),
+    "invalid_input"
   )
 })
 
 test_that("ambiguous and unsupported objects are refused", {
-  expect_error(yaml_emit(list(a = 1, 2)), "partially named")
-  expect_error(yaml_emit(stats::setNames(list(1, 2), c("a", "a"))), "duplicate names")
-  expect_error(yaml_emit(data.frame(a = 1)), "Data frames")
-  expect_error(yaml_emit(yaml_parse("? [a]\n: 1\n")), "zuyaml_map")
-  expect_error(yaml_emit(sum), "Cannot emit")
-  expect_error(yaml_emit(Sys.Date()), "Cannot emit")
+  expect_identical(error_code(yaml_emit(list(a = 1, 2))), "partial_names")
+  expect_identical(
+    error_code(yaml_emit(stats::setNames(list(1, 2), c("a", "a")))),
+    "duplicate_key"
+  )
+  expect_identical(error_code(yaml_emit(data.frame(a = 1))), "unsupported_type")
+  expect_identical(error_code(yaml_emit(yaml_parse("? [a]\n: 1\n"))),
+                   "unsupported_type")
+  expect_identical(error_code(yaml_emit(sum)), "unsupported_type")
+  expect_identical(error_code(yaml_emit(Sys.Date())), "unsupported_type")
 })
 
 test_that("formatting options are validated and applied", {
@@ -106,9 +110,19 @@ test_that("formatting options are validated and applied", {
   expect_match(yaml_emit(list(a = 1L), document_end = TRUE), "\\.\\.\\.")
 
   # indent and width are uint8_t upstream; width = 1000 would silently wrap.
-  expect_error(yaml_emit(1L, width = 1000), "between 0 and 255")
-  expect_error(yaml_emit(1L, indent = 0), "between 1 and 255")
-  expect_error(yaml_emit(1L, indent = NA), "between 1 and 255")
+  # Both ends of each range, and one past them (#36).
+  emit_code <- function(...) error_code(yaml_emit(list(a = 1L), ...))
+  expect_identical(emit_code(indent = 1), NA_character_)
+  expect_identical(emit_code(indent = 255), NA_character_)
+  expect_identical(emit_code(indent = 0), "invalid_input")
+  expect_identical(emit_code(indent = 256), "invalid_input")
+  expect_identical(emit_code(indent = NA), "invalid_input")
+  expect_identical(emit_code(width = 0), NA_character_)
+  expect_identical(emit_code(width = 255), NA_character_)
+  expect_identical(emit_code(width = -1), "invalid_input")
+  expect_identical(emit_code(width = 256), "invalid_input")
+  expect_identical(emit_code(width = 1000), "invalid_input")
+  expect_identical(emit_code(document_start = NA), "invalid_input")
 })
 
 test_that("yaml_emit_all produces a parseable stream", {
@@ -117,7 +131,7 @@ test_that("yaml_emit_all produces a parseable stream", {
   expect_match(out, "---")
   expect_identical(yaml_parse_all(out), list(list(a = 1L), list(b = 2L)))
   expect_identical(yaml_emit_all(list()), "")
-  expect_error(yaml_emit_all(42L), "must be a list")
+  expect_identical(error_code(yaml_emit_all(42L)), "invalid_input")
 })
 
 test_that("nested structures round-trip", {
@@ -131,4 +145,51 @@ test_that("nested structures round-trip", {
     note = NULL
   )
   expect_identical(yaml_parse(yaml_emit(x)), x)
+})
+
+test_that("every string the parser resolves as non-string is quoted (#30)", {
+  # The oracle is the parser itself: a string emitted plain must not come
+  # back as anything else. cyaml's resolver is wider than the core schema
+  # (signs before 0x/0o, keywords in any case), and the emitter used to
+  # quote only the core schema's spellings.
+  case_variants <- function(word) {
+    chars <- strsplit(word, "")[[1]]
+    alts <- lapply(chars, function(ch) unique(c(tolower(ch), toupper(ch))))
+    apply(expand.grid(alts, stringsAsFactors = FALSE), 1, paste, collapse = "")
+  }
+  keywords <- unlist(lapply(
+    c("null", "true", "false", ".inf", "+.inf", "-.inf", ".nan"),
+    case_variants
+  ))
+  numbers <- c(
+    outer(c("", "+", "-"), c("0x1F", "0X1f", "0o17", "0O7", "42", "007",
+                             "1.5", ".5", "1.", "1e3", "1.5E-3"), paste0)
+  )
+  withr::local_seed(30)
+  alphabet <- strsplit("+-0123456789.xXoOeEaAfFiInNlLtTrRuUsS~", "")[[1]]
+  random <- vapply(seq_len(3000), function(i) {
+    paste(sample(alphabet, sample(1:6, 1), replace = TRUE), collapse = "")
+  }, "")
+  for (s in unique(c(keywords, numbers, random))) {
+    expect_identical(yaml_parse(yaml_emit(list(v = s)))$v, s, info = s)
+  }
+  # The same through a character vector, which builds elements one by one.
+  v <- c("-0x10", "nULL", ".iNf", "tRUE", "+0o7")
+  expect_identical(unlist(yaml_parse(yaml_emit(v))), v)
+})
+
+test_that("map keys are translated to UTF-8 like values (#32)", {
+  latin1 <- iconv("café", "UTF-8", "latin1")
+  k <- list(1L)
+  names(k) <- latin1
+  out <- yaml_emit(k)
+  expect_true(validUTF8(out))
+  expect_identical(Encoding(out), "UTF-8")
+  expect_identical(names(yaml_parse(out)), "café")
+
+  # The same text in two encodings is one name, so it is a duplicate.
+  dup <- list(1L, 2L)
+  names(dup) <- c(latin1, "café")
+  err <- tryCatch(yaml_emit(dup), zuyaml_error = identity)
+  expect_identical(err$code, "duplicate_key")
 })

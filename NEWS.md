@@ -1,31 +1,60 @@
-# zuyaml (development version)
+# zuyaml 0.1.1
 
-* Numbers are converted by the header-only zufast package (`LinkingTo:`), not
-  by the C library's `strtod()`, so floats are correctly rounded on every
-  platform. Under an explicit `!!float` tag, text that is C number syntax but
-  not YAML float syntax is now a string, as under every other core tag:
-  `!!float 0x10`, `!!float 0x1p3` and `!!float inf` used to give 16, 8 and
-  `Inf` (#14).
+A bug-fix release. Several of these fixes correct values that 0.1.0 returned
+silently wrong, so upgrading is recommended.
+
+## Bug fixes
+
+* Integers above 2^64 keep their digits. 0.1.0 wrapped some of them modulo
+  2^64 without a warning: `43526186596692760666` came back as the
+  `zuyaml_bigint` `"6632698449273657434"` (#37).
+
+* Hex and octal integers beyond 64 bits, and negative ones below -2^63, are
+  `zuyaml_bigint` like their decimal spellings and follow `big_integers`.
+  0.1.0 returned them as strings. A hex or octal literal longer than 4096
+  digits is refused with code `limit_size` (#31).
+
+* `yaml_emit()` quotes every string the parser would read back as another
+  type. `"-0x10"`, `"+0o7"`, `"nULL"`, `"tRUE"` and `".iNf"` used to be
+  emitted plain and came back as `-16L`, `7L`, `NULL`, `TRUE` and `Inf`
+  (#30).
+
+* `yaml_emit()` translates names to UTF-8 as it does values. A latin1 name
+  produced output that was not valid UTF-8, and two names with the same text in
+  different encodings were not caught as duplicates (#32).
 
 * Deeply nested flow collections (`[[[...]]]`, `{a: {a: ...}}`) are refused
   as soon as they pass `max_depth`. Before, the whole document was scanned
-  first, which takes time growing with the square of the depth: 80 KB of `[`
-  took ten seconds, so a small hostile document could hold the parser for
-  hours. The error is still `limit_depth`, and now carries a line and column
-  (#28).
+  first, in time growing with the square of the depth: 80 KB of `[` took ten
+  seconds, so a small hostile document could hold the parser for hours. The
+  error is still `limit_depth`. A document that is both too deep and invalid in
+  another way now reports `limit_depth` rather than the other error (#28,
+  #34).
 
-* Nesting deeper than the C stack allows, possible with `max_depth = 0` or with
-  a deeply nested list given to `yaml_emit()`, now raises R's
+* Nesting deeper than the C stack allows, possible with `max_depth = 0` or
+  with a deeply nested list given to `yaml_emit()`, raises R's
   `stackOverflowError` instead of crashing the session. The default
   `max_depth` trips first with a wide margin, measured at about 10x on a
   256 KB stack (#8).
 
-* `yaml_emit()` output longer than an R string can hold is an error with code
-  `limit_size`, not R's "negative length vectors are not allowed". The output
-  buffer no longer leaks when that error is raised (#8).
+* `yaml_emit()` of more than an R string can hold (2^31 - 1 bytes) is an error
+  with code `limit_size`. It used to hang, uninterruptibly, once the strings
+  being emitted passed 2 GB, or fail with "negative length vectors are not
+  allowed" (#8, #33).
 
-* `devtools::test(shuffle = TRUE)` passes: no test depends on a helper defined
-  earlier in its file (#27).
+* Errors found while converting a parsed document (`duplicate_key`,
+  `limit_depth`, `limit_nodes`, `precision`, `alias`, `unsupported_tag`) carry
+  `line` and `column`, and `path` when reading a file; they were `NULL`. An
+  end position that is not known is `NULL` rather than `0` (#35).
+
+## Other changes
+
+* Numbers are converted by the header-only zufast package (`LinkingTo:`)
+  instead of the C library's `strtod()`, so floats are correctly rounded on
+  every platform. Under an explicit `!!float` tag, text that is C number
+  syntax but not YAML float syntax is now a string, as under every other core
+  tag: `!!float 0x10`, `!!float 0x1p3` and `!!float inf` used to give 16, 8
+  and `Inf` (#14).
 
 # zuyaml 0.1.0
 

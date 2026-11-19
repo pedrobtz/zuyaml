@@ -20,10 +20,6 @@ test_that("yaml_parse_all always returns a list, one element per document", {
 
 test_that("yaml_parse rejects a stream that is not exactly one document", {
   # Trailing documents must never be silently discarded.
-  expect_error(
-    yaml_parse("---\nnull\n---\nnull\n"),
-    "contains 2 documents"
-  )
   err <- tryCatch(yaml_parse("---\nnull\n---\nnull\n"), zuyaml_error = identity)
   expect_identical(err$code, "too_many_documents")
 })
@@ -72,14 +68,13 @@ test_that("duplicate-key rejection comes from zuyaml, not cyaml", {
   # raised -- `grep -r dup_keys src/` matches only the header. Rejection is
   # therefore zuyaml's own work, done while building the name vector.
   #
-  # Errors raised during conversion carry no source span, whereas a cyaml parse
-  # error does. That difference pins which layer rejected the document: if a
-  # future re-vendor implements detection upstream, `line` becomes non-NULL and
-  # this test fails, prompting a re-read of the design's verification note.
+  # Conversion errors carry the position of the second key (#35), as a cyaml
+  # parse error carries its own, so position no longer tells the layers apart;
+  # the message does, and the grep above is the check on upstream.
   err <- tryCatch(yaml_parse("a: 1\na: 2\n"), zuyaml_error = identity)
   expect_identical(err$code, "duplicate_key")
-  expect_null(err$line)
-  expect_null(err$column)
+  expect_identical(err$line, 2L)
+  expect_identical(err$column, 1L)
 
   # By contrast, a genuine cyaml parse error does carry a position.
   syntax <- tryCatch(yaml_parse("a: [1, 2"), zuyaml_error = identity)
@@ -87,12 +82,31 @@ test_that("duplicate-key rejection comes from zuyaml, not cyaml", {
 })
 
 test_that("invalid arguments are refused before reaching C", {
-  expect_error(yaml_parse(1L), "single string or a raw vector")
-  expect_error(yaml_parse(c("a", "b")), "single string or a raw vector")
-  expect_error(yaml_parse(NA_character_), "single string or a raw vector")
-  expect_error(yaml_parse("null", max_depth = -1), "between 0 and 4294967295")
-  expect_error(yaml_parse("null", max_depth = 2^33), "between 0 and 4294967295")
-  expect_error(yaml_parse("null", duplicate_keys = NA), "must be TRUE or FALSE")
+  expect_identical(error_code(yaml_parse(1L)), "invalid_input")
+  expect_identical(error_code(yaml_parse(c("a", "b"))), "invalid_input")
+  expect_identical(error_code(yaml_parse(NA_character_)), "invalid_input")
+  expect_identical(error_code(yaml_parse("null", duplicate_keys = NA)),
+                   "invalid_input")
+  expect_error(yaml_parse("null", duplicate_keys = NA),
+               class = "zuyaml_error")
+})
+
+test_that("uint32 limits are accepted to their bound and no further (#36)", {
+  # Upstream stores these as uint32_t. Straddle both ends, on every argument
+  # that goes through check_uint32().
+  for (arg in c("max_depth", "max_size")) {
+    call <- function(v) error_code(do.call(yaml_parse, setNames(list("null", v), c("", arg))))
+    expect_identical(call(0), NA_character_, info = arg)
+    expect_identical(call(4294967295), NA_character_, info = arg)
+    expect_identical(call(-1), "invalid_input", info = arg)
+    expect_identical(call(4294967296), "invalid_input", info = arg)
+    expect_identical(call(NA_real_), "invalid_input", info = arg)
+    expect_identical(call(c(1, 2)), "invalid_input", info = arg)
+    expect_identical(call("1"), "invalid_input", info = arg)
+  }
+  # max_nodes is a count with no upper bound.
+  expect_identical(error_code(yaml_parse("null", max_nodes = 2^40)), NA_character_)
+  expect_identical(error_code(yaml_parse("null", max_nodes = -1)), "invalid_input")
 })
 
 test_that("max_depth is enforced", {
@@ -113,4 +127,55 @@ test_that("errors raised mid-conversion do not leak the stream", {
   }
   gc()
   expect_true(TRUE)
+})
+
+test_that("conversion errors carry a line, column and path (#35)", {
+  # Each code is raised during conversion, after cyaml has parsed, and used to
+  # arrive with line, column and path all NULL, even from yaml_read().
+  cases <- list(
+    list(doc = "a: 1\nb: 2\na: 3\n", args = list(), code = "duplicate_key",
+         line = 3L),
+    list(doc = "x: 1\ny:\n  - - - 1\n", args = list(max_depth = 3),
+         code = "limit_depth", line = 3L),
+    list(doc = "x: 1\ny: 99999999999999999999\n",
+         args = list(big_integers = "error"), code = "precision", line = 2L),
+    list(doc = "x: &a 1\ny: *a\n", args = list(aliases = "error"),
+         code = "alias", line = 2L),
+    list(doc = "x: 1\ny: [1, 2, 3]\n", args = list(max_nodes = 3),
+         code = "limit_nodes", line = 2L),
+    list(doc = "x: 1\ny: !app 1\n", args = list(tags = "error"),
+         code = "unsupported_tag", line = 2L)
+  )
+  path <- withr::local_tempfile(fileext = ".yml")
+  for (case in cases) {
+    writeLines(case$doc, path, sep = "")
+    for (via in c("text", "file")) {
+      err <- tryCatch(
+        if (via == "text") {
+          do.call(yaml_parse, c(list(case$doc), case$args))
+        } else {
+          do.call(yaml_read, c(list(path), case$args))
+        },
+        zuyaml_error = identity
+      )
+      info <- paste(case$code, via)
+      expect_s3_class(err, "zuyaml_parse_error")
+      expect_identical(err$code, case$code, info = info)
+      expect_identical(err$line, case$line, info = info)
+      expect_type(err$column, "integer")
+      if (via == "file") {
+        expect_identical(err$path, path, info = info)
+      } else {
+        expect_null(err$path)
+      }
+    }
+  }
+})
+
+test_that("an unknown span end is NULL, not 0 (#35)", {
+  err <- tryCatch(yaml_parse("[[[[1]]]]", max_depth = 2),
+                  zuyaml_error = identity)
+  expect_identical(err$line, 1L)
+  expect_null(err$end_line)
+  expect_null(err$end_column)
 })

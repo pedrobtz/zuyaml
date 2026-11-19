@@ -60,8 +60,14 @@ static SEXP build_condition(const char* message, const char* code,
     if (span != NULL) {
         SET_VECTOR_ELT(cond, 3, Rf_ScalarInteger((int)span->start_line));
         SET_VECTOR_ELT(cond, 4, Rf_ScalarInteger((int)span->start_col));
-        SET_VECTOR_ELT(cond, 5, Rf_ScalarInteger((int)span->end_line));
-        SET_VECTOR_ELT(cond, 6, Rf_ScalarInteger((int)span->end_col));
+        /* The scanner fills only the start of a span it errors at, so an end
+           of 0 means "not known", which is NULL, never position 0 (#35). */
+        SET_VECTOR_ELT(cond, 5, span->end_line > 0
+                ? Rf_ScalarInteger((int)span->end_line)
+                : R_NilValue);
+        SET_VECTOR_ELT(cond, 6, span->end_line > 0
+                ? Rf_ScalarInteger((int)span->end_col)
+                : R_NilValue);
     } else {
         SET_VECTOR_ELT(cond, 3, R_NilValue);
         SET_VECTOR_ELT(cond, 4, R_NilValue);

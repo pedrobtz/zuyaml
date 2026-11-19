@@ -190,6 +190,7 @@ SEXP zuyaml_parse_(SEXP x, SEXP simplify, SEXP aliases, SEXP big_integers,
     ctx.tag_error = (strcmp(CHAR(STRING_ELT(tags, 0)), "error") == 0);
     ctx.max_nodes = Rf_asReal(max_nodes);
     ctx.nodes = 0;
+    ctx.path = path;
     {
         const char* bi = CHAR(STRING_ELT(big_integers, 0));
         ctx.big_integers = (strcmp(bi, "double") == 0) ? ZUYAML_BIGINT_DOUBLE
