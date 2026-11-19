@@ -351,7 +351,7 @@ static cyaml_node_t* build_element(cyaml_doc_t* doc, SEXP x, R_xlen_t i)
     }
     default:
         zuyaml_stopf("unsupported_type", NULL,
-            "Cannot emit an R object of type '%s'.", Rf_type2char(TYPEOF(x)));
+            "Cannot emit an R object of type '%s'.", Rf_type2char((SEXPTYPE)TYPEOF(x)));
     }
 }
 
@@ -530,7 +530,7 @@ static cyaml_node_t* build_node(cyaml_doc_t* doc, SEXP x)
         break;
     default:
         zuyaml_stopf("unsupported_type", NULL,
-            "Cannot emit an R object of type '%s'.", Rf_type2char(TYPEOF(x)));
+            "Cannot emit an R object of type '%s'.", Rf_type2char((SEXPTYPE)TYPEOF(x)));
     }
 
     /* An S3/S4 object of an unrecognised class is refused rather than being

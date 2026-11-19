@@ -173,7 +173,9 @@ Package-owned: `hardening.yaml` fetches the full yaml-test-suite and runs the
 suite, `tools/conformance.R` and the fuzz cases, weekly and on push.
 `pkgdown.yaml` builds the site.
 
-`vendor.yaml` calls r-actions' `vendor.yml`: `tools/verify-vendor` rebuilds
+`warnings.yaml` compiles our own C sources (not the vendored ones) with GCC and
+clang at `-Wextra -Wconversion -Werror` through `tools/ci/compile-warnings.sh`,
+which runs the same locally. `vendor.yaml` calls r-actions' `vendor.yml`: `tools/verify-vendor` rebuilds
 `src/cyaml*` from the pinned commit plus `tools/patches/` and requires it byte
 for byte, so a hand edit to a vendored file fails on its pull request.
 

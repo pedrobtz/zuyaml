@@ -740,7 +740,7 @@ static SEXP maybe_simplify(SEXP list)
 
     for (i = 0; i < n; i++) {
         SEXP el = VECTOR_ELT(list, i);
-        SEXPTYPE et = TYPEOF(el);
+        SEXPTYPE et = (SEXPTYPE)TYPEOF(el);
 
         if (el == R_NilValue || XLENGTH(el) != 1) {
             return list;

@@ -1,0 +1,58 @@
+# Wide compiler warnings on zuyaml's own C sources, as errors (#7).
+#
+# CRAN compiles with -Wall -pedantic, and the r-actions containers reproduce
+# exactly that, so nothing else here runs -Wextra or the conversion warnings.
+# This job is not a CRAN check and has no bearing on one, which is why it can
+# be as strict as we like. tools/ci/compile-warnings.sh has the flag set, what
+# is excluded and why; run it locally the same way.
+#
+# One Linux job, with the runner's GCC and clang: the two disagree on what
+# -Wconversion reports. A compile only, no R CMD check, so it takes about a
+# minute.
+
+on:
+  # No `push:`: a pull request already checks its merge with main,
+  # and the schedule checks main (r-actions README, "Pushes to main").
+  pull_request:
+  schedule:
+    - cron: "43 5 * * 1"
+  workflow_dispatch:
+
+name: warnings.yaml
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:warnings'))
+    uses: pedrobtz/r-actions/.github/workflows/changes.yml@v1
+    with:
+      name: warnings
+      # Only C sources and their build flags matter here.
+      skip-r-only: true
+
+  warnings:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
+    runs-on: ubuntu-latest
+    name: gcc and clang, -Wextra -Wconversion -Werror
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+
+      # zufast is header-only and LinkingTo, so the headers are all it needs.
+      - name: Install zufast
+        run: Rscript -e 'install.packages("zufast")'
+
+      - name: Compile with wide warnings
+        run: tools/ci/compile-warnings.sh gcc clang
