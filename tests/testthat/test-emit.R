@@ -132,3 +132,34 @@ test_that("nested structures round-trip", {
   )
   expect_identical(yaml_parse(yaml_emit(x)), x)
 })
+
+test_that("every string the parser resolves as non-string is quoted (#30)", {
+  # The oracle is the parser itself: a string emitted plain must not come
+  # back as anything else. cyaml's resolver is wider than the core schema
+  # (signs before 0x/0o, keywords in any case), and the emitter used to
+  # quote only the core schema's spellings.
+  case_variants <- function(word) {
+    chars <- strsplit(word, "")[[1]]
+    alts <- lapply(chars, function(ch) unique(c(tolower(ch), toupper(ch))))
+    apply(expand.grid(alts, stringsAsFactors = FALSE), 1, paste, collapse = "")
+  }
+  keywords <- unlist(lapply(
+    c("null", "true", "false", ".inf", "+.inf", "-.inf", ".nan"),
+    case_variants
+  ))
+  numbers <- c(
+    outer(c("", "+", "-"), c("0x1F", "0X1f", "0o17", "0O7", "42", "007",
+                             "1.5", ".5", "1.", "1e3", "1.5E-3"), paste0)
+  )
+  withr::local_seed(30)
+  alphabet <- strsplit("+-0123456789.xXoOeEaAfFiInNlLtTrRuUsS~", "")[[1]]
+  random <- vapply(seq_len(3000), function(i) {
+    paste(sample(alphabet, sample(1:6, 1), replace = TRUE), collapse = "")
+  }, "")
+  for (s in unique(c(keywords, numbers, random))) {
+    expect_identical(yaml_parse(yaml_emit(list(v = s)))$v, s, info = s)
+  }
+  # The same through a character vector, which builds elements one by one.
+  v <- c("-0x10", "nULL", ".iNf", "tRUE", "+0o7")
+  expect_identical(unlist(yaml_parse(yaml_emit(v))), v)
+})

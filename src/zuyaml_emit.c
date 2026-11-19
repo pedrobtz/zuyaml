@@ -9,6 +9,7 @@
 #include <zufast/number.h>
 
 #include "zuyaml.h"
+#include "cyaml_utf8.h" /* cyaml_scan_int(), cyaml_scan_float() */
 
 /* --- unwind-safe ownership of the document being built ----------------- */
 
@@ -93,6 +94,51 @@ static bool matches(const char* s, size_t n, const char* lit)
  * read "everything else is upstream's job" into either function -- upstream
  * quotes for syntax, not for meaning, and the two are separate concerns.
  */
+static bool ascii_ieq(const char* s, size_t n, const char* lit)
+{
+    size_t i;
+
+    if (strlen(lit) != n) {
+        return false;
+    }
+    for (i = 0; i < n; i++) {
+        char c = s[i];
+        if (c >= 'A' && c <= 'Z') {
+            c = (char)(c - 'A' + 'a');
+        }
+        if (c != lit[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/*
+ * What cyaml's own resolver, cyaml_scalar_kind() in cyaml.c, reads as
+ * something other than a string, using the same functions and the same
+ * case-insensitive keyword match. The resolver is wider than the core
+ * schema: a sign before 0x and 0o, and null, true, false, .inf and .nan in
+ * any case. A copy of the core schema's narrower rules emitted "-0x10",
+ * "nULL" and ".iNf" plain, and they came back as -16L, NULL and Inf (#30).
+ * Asking the resolver's functions keeps the two in step by construction.
+ */
+static bool resolver_reads_non_string(const char* s, size_t n)
+{
+    static const char* const keywords[] = { "null", "true", "false", ".nan",
+        ".inf", "+.inf", "-.inf" };
+    size_t k;
+
+    if (n == 1 && s[0] == '~') {
+        return true;
+    }
+    for (k = 0; k < sizeof(keywords) / sizeof(keywords[0]); k++) {
+        if (ascii_ieq(s, n, keywords[k])) {
+            return true;
+        }
+    }
+    return cyaml_scan_int(s, n) || cyaml_scan_float(s, n);
+}
+
 static bool resolves_as_non_string(const char* s, size_t n)
 {
     size_t i = 0;
@@ -100,6 +146,9 @@ static bool resolves_as_non_string(const char* s, size_t n)
 
     if (n == 0) {
         return true; /* empty must be quoted or it reads as null */
+    }
+    if (resolver_reads_non_string(s, n)) {
+        return true;
     }
 
     /* null */
