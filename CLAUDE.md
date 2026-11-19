@@ -186,6 +186,11 @@ same locally. `vendor.yaml` calls r-actions' `vendor.yml`:
 `tools/verify-vendor` rebuilds `src/cyaml*` from the pinned commit plus
 `tools/patches/` and requires it byte for byte, so a hand edit to a vendored
 file fails on its pull request. `pkgdown.yaml` builds the site.
+`cran-release.yaml` (r-actions `cran-release.yml`, pinned to a commit because
+it writes) runs when a commit to `main` changes `CRAN-SUBMISSION`: it tags the
+submitted commit with the bare version, creates the GitHub release from
+`NEWS.md`, and opens the `.9000` bump pull request, which merges only after
+CRAN accepts.
 
 ## Vendored native code
 
