@@ -173,8 +173,9 @@ Package-owned: `hardening.yaml` fetches the full yaml-test-suite and runs the
 suite, `tools/conformance.R` and the fuzz cases, weekly and on push.
 `pkgdown.yaml` builds the site.
 
-Open CI gaps: #9 (no `vendor.yml`, so nothing guards hand edits to
-`src/cyaml*.c`) and #7 (`-Wextra` no longer runs anywhere).
+`vendor.yaml` calls r-actions' `vendor.yml`: `tools/verify-vendor` rebuilds
+`src/cyaml*` from the pinned commit plus `tools/patches/` and requires it byte
+for byte, so a hand edit to a vendored file fails on its pull request.
 
 ## Vendored native code
 

@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+#
+# Verify that src/cyaml* is exactly upstream plus tools/patches/.
+#
+# Usage:  tools/verify-vendor
+#
+# Re-runs tools/vendor-cyaml.sh in a scratch copy, which fetches the pinned
+# commit, checks every upstream file against its SHA-256 manifest and applies
+# the patch series, then requires the result to match src/ byte for byte.
+# The same file set is required too, so a vendored file added or removed by
+# hand fails as well as one edited by hand. Called by .github/workflows/
+# vendor.yaml (r-actions vendor.yml) on every pull request; needs network
+# access to GitHub.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+mkdir -p "$tmp/tools" "$tmp/src" "$tmp/inst"
+cp "$root/tools/vendor-cyaml.sh" "$tmp/tools/"
+cp -R "$root/tools/patches" "$tmp/tools/"
+(cd "$tmp" && bash tools/vendor-cyaml.sh)
+
+fail=0
+want="$(cd "$tmp/src" && ls cyaml*.c cyaml*.h | sort)"
+have="$(cd "$root/src" && ls cyaml*.c cyaml*.h | sort)"
+if [ "$want" != "$have" ]; then
+  echo "error: src/ does not hold the vendored file set" >&2
+  diff <(printf '%s\n' "$want") <(printf '%s\n' "$have") >&2 || true
+  fail=1
+fi
+for f in $want; do
+  if ! cmp -s "$tmp/src/$f" "$root/src/$f"; then
+    echo "error: src/$f differs from upstream plus tools/patches/" >&2
+    diff -u "$tmp/src/$f" "$root/src/$f" >&2 || true
+    fail=1
+  fi
+done
+
+# The provenance record, apart from the date and the archive checksum, which
+# change with every run (GitHub archives are not byte-stable).
+strip() { grep -vE '^(vendored|archive):' "$1"; }
+if ! diff -u <(strip "$tmp/inst/cyaml-VERSION") <(strip "$root/inst/cyaml-VERSION") >&2; then
+  echo "error: inst/cyaml-VERSION does not match what tools/vendor-cyaml.sh writes" >&2
+  fail=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo >&2
+  echo "Vendored code changes only through tools/vendor-cyaml.sh and a patch in" >&2
+  echo "tools/patches/ (see its README.md), never by hand." >&2
+  exit 1
+fi
+echo "src/cyaml* matches cyaml at the pinned commit plus $(ls "$root"/tools/patches/*.patch | wc -l | tr -d ' ') patches."
