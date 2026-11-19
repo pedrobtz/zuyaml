@@ -2,6 +2,40 @@
 
 ## zuyaml (development version)
 
+- Numbers are converted by the header-only zufast package
+  (`LinkingTo:`), not by the C library’s `strtod()`, so floats are
+  correctly rounded on every platform. Under an explicit `!!float` tag,
+  text that is C number syntax but not YAML float syntax is now a
+  string, as under every other core tag: `!!float 0x10`, `!!float 0x1p3`
+  and `!!float inf` used to give 16, 8 and `Inf`
+  ([\#14](https://github.com/pedrobtz/zuyaml/issues/14)).
+
+- Deeply nested flow collections (`[[[...]]]`, `{a: {a: ...}}`) are
+  refused as soon as they pass `max_depth`. Before, the whole document
+  was scanned first, which takes time growing with the square of the
+  depth: 80 KB of `[` took ten seconds, so a small hostile document
+  could hold the parser for hours. The error is still `limit_depth`, and
+  now carries a line and column
+  ([\#28](https://github.com/pedrobtz/zuyaml/issues/28)).
+
+- Nesting deeper than the C stack allows, possible with `max_depth = 0`
+  or with a deeply nested list given to
+  [`yaml_emit()`](https://pedrobtz.github.io/zuyaml/reference/yaml_emit.md),
+  now raises R’s `stackOverflowError` instead of crashing the session.
+  The default `max_depth` trips first with a wide margin, measured at
+  about 10x on a 256 KB stack
+  ([\#8](https://github.com/pedrobtz/zuyaml/issues/8)).
+
+- [`yaml_emit()`](https://pedrobtz.github.io/zuyaml/reference/yaml_emit.md)
+  output longer than an R string can hold is an error with code
+  `limit_size`, not R’s “negative length vectors are not allowed”. The
+  output buffer no longer leaks when that error is raised
+  ([\#8](https://github.com/pedrobtz/zuyaml/issues/8)).
+
+- `devtools::test(shuffle = TRUE)` passes: no test depends on a helper
+  defined earlier in its file
+  ([\#27](https://github.com/pedrobtz/zuyaml/issues/27)).
+
 ## zuyaml 0.1.0
 
 CRAN release: 2026-10-07

@@ -56,6 +56,11 @@ formatting. Comments, quoting style and flow-versus-block choices are
 not preserved; see `vignette("zuyaml")` for the conversions that do not
 round trip.
 
+There is no depth limit: `x` is an R object, already in memory. A list
+nested deeper than the C stack allows raises R's `stackOverflowError`,
+and output longer than an R string can hold (2^31 - 1 bytes) is an error
+with `code` `"limit_size"`.
+
 ## Examples
 
 ``` r
