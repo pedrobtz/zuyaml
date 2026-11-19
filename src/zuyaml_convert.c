@@ -11,9 +11,32 @@
 /* Largest integer exactly representable as an IEEE-754 double. */
 #define ZUYAML_MAX_EXACT_DOUBLE 9007199254740992.0
 
-_Noreturn static void stop_embedded_nul(const cyaml_node_t* node)
+/*
+ * Where a node is, for a condition, or NULL when nothing says. cyaml copies a
+ * collection's position from its start event, which a block collection does
+ * not have (no '[' or '{' to point at), and composes an alias with a zeroed
+ * span. A collection without one is reported at its first descendant that
+ * has one, which is the first line of its content. Iterative, because this
+ * runs on the error path of a depth limit.
+ */
+static const cyaml_span_t* span_of(const cyaml_node_t* node)
 {
-    zuyaml_stopf_at("embedded_nul", NULL, &node->span,
+    while (node != NULL && node->span.start_line == 0) {
+        if (node->type == CYAML_SEQ && cyaml_seq_len(node) > 0) {
+            node = cyaml_seq_get(node, 0);
+        } else if (node->type == CYAML_MAP && cyaml_map_len(node) > 0) {
+            node = cyaml_map_at(node, 0)->key;
+        } else {
+            return NULL;
+        }
+    }
+    return node != NULL ? &node->span : NULL;
+}
+
+_Noreturn static void stop_embedded_nul(
+    const cyaml_node_t* node, const zuyaml_ctx_t* ctx)
+{
+    zuyaml_stopf_at("embedded_nul", ctx->path, &node->span,
         "YAML scalar at line %u, column %u contains an embedded NUL byte, "
         "which cannot be represented as an R string.",
         (unsigned)node->span.start_line, (unsigned)node->span.start_col);
@@ -30,10 +53,11 @@ _Noreturn static void stop_embedded_nul(const cyaml_node_t* node)
  * the \0 escape below, and any future decoding path that can synthesise one.
  * The guard is kept rather than assumed unreachable.
  */
-static void check_no_nul(const char* s, size_t len, const cyaml_node_t* node)
+static void check_no_nul(const char* s, size_t len, const cyaml_node_t* node,
+    const zuyaml_ctx_t* ctx)
 {
     if (memchr(s, '\0', len) != NULL) {
-        stop_embedded_nul(node);
+        stop_embedded_nul(node, ctx);
     }
 }
 
@@ -126,7 +150,8 @@ static bool spans_lines(const char* p, uint32_t n)
         || memchr(p, '\r', (size_t)n) != NULL;
 }
 
-static SEXP scalar_charsxp(const cyaml_doc_t* doc, const cyaml_node_t* node)
+static SEXP scalar_charsxp(
+    const cyaml_doc_t* doc, const cyaml_node_t* node, const zuyaml_ctx_t* ctx)
 {
     const char* raw = cyaml_str(doc, node);
     uint32_t raw_n = cyaml_len(node);
@@ -135,7 +160,7 @@ static SEXP scalar_charsxp(const cyaml_doc_t* doc, const cyaml_node_t* node)
         if (raw == NULL || raw_n == 0) {
             return Rf_mkCharLenCE("", 0, CE_UTF8);
         }
-        check_no_nul(raw, (size_t)raw_n, node);
+        check_no_nul(raw, (size_t)raw_n, node, ctx);
         return Rf_mkCharLenCE(raw, (int)raw_n, CE_UTF8);
     }
 
@@ -143,10 +168,10 @@ static SEXP scalar_charsxp(const cyaml_doc_t* doc, const cyaml_node_t* node)
        a NUL-producing escape without telling us. */
     {
         if (raw != NULL && raw_n > 0) {
-            check_no_nul(raw, (size_t)raw_n, node);
+            check_no_nul(raw, (size_t)raw_n, node, ctx);
             if (node->style == CYAML_DOUBLE
                 && has_nul_escape(raw, (size_t)raw_n)) {
-                stop_embedded_nul(node);
+                stop_embedded_nul(node, ctx);
             }
         }
     }
@@ -168,9 +193,10 @@ static SEXP scalar_charsxp(const cyaml_doc_t* doc, const cyaml_node_t* node)
     }
 }
 
-static SEXP scalar_string(const cyaml_doc_t* doc, const cyaml_node_t* node)
+static SEXP scalar_string(
+    const cyaml_doc_t* doc, const cyaml_node_t* node, const zuyaml_ctx_t* ctx)
 {
-    SEXP ch = PROTECT(scalar_charsxp(doc, node));
+    SEXP ch = PROTECT(scalar_charsxp(doc, node, ctx));
     SEXP out = Rf_ScalarString(ch);
     UNPROTECT(1);
     return out;
@@ -198,13 +224,14 @@ static SEXP mk_bigint(const char* digits)
  * numeric type. `digits` is the decimal normalisation, `approx` the lossy
  * double, already computed by the caller.
  */
-static SEXP big_integer(zuyaml_ctx_t* ctx, const char* digits, double approx)
+static SEXP big_integer(zuyaml_ctx_t* ctx, const cyaml_node_t* node,
+    const char* digits, double approx)
 {
     switch (ctx->big_integers) {
     case ZUYAML_BIGINT_DOUBLE:
         return Rf_ScalarReal(approx);
     case ZUYAML_BIGINT_ERROR:
-        zuyaml_stopf("precision", NULL,
+        zuyaml_stopf_at("precision", ctx->path, span_of(node),
             "Integer %s cannot be represented exactly by an R numeric type; "
             "set big_integers to \"bigint\" or \"double\".",
             digits);
@@ -270,8 +297,8 @@ static zuf_status int_magnitude(const char* s, size_t n, bool* neg,
  */
 #define ZUYAML_MAX_WIDE_DIGITS 4096u
 
-static const char* wide_decimal(
-    const char* d, size_t n, int base, bool neg, size_t* out_n)
+static const char* wide_decimal(const char* d, size_t n, int base, bool neg,
+    size_t* out_n, const cyaml_node_t* node, const zuyaml_ctx_t* ctx)
 {
     char* out;
     size_t len = 0;
@@ -292,7 +319,7 @@ static const char* wide_decimal(
         uint32_t* limb;
 
         if (n > ZUYAML_MAX_WIDE_DIGITS) {
-            zuyaml_stopf("limit_size", NULL,
+            zuyaml_stopf_at("limit_size", ctx->path, span_of(node),
                 "A base-%d integer literal of %.0f digits is longer than "
                 "zuyaml converts (%u).",
                 base, (double)n, ZUYAML_MAX_WIDE_DIGITS);
@@ -348,7 +375,7 @@ static SEXP scalar_int(const cyaml_doc_t* doc, const cyaml_node_t* node,
        validated rather than trusted: `!!int 1 - 3` is a string, which is
        what an unresolvable scalar is. */
     if (text == NULL) {
-        return scalar_string(doc, node);
+        return scalar_string(doc, node, ctx);
     }
     st = int_magnitude(text, (size_t)text_n, &is_neg, &mag, &d, &d_n, &base);
     if (st == ZUF_OK) {
@@ -361,17 +388,17 @@ static SEXP scalar_int(const cyaml_doc_t* doc, const cyaml_node_t* node,
         }
         snprintf(digits, sizeof(digits), "%s%" PRIu64, is_neg ? "-" : "",
             mag);
-        return big_integer(ctx, digits, is_neg ? -(double)mag : (double)mag);
+        return big_integer(ctx, node, digits, is_neg ? -(double)mag : (double)mag);
     }
     if (st != ZUF_ERR_RANGE) {
-        return scalar_string(doc, node);
+        return scalar_string(doc, node, ctx);
     }
 
     /* Beyond uint64, in any base (#31): the decimal normalisation
        mk_bigint promises, and the nearest double parsed from it. */
-    norm = wide_decimal(d, d_n, base, is_neg, &norm_n);
+    norm = wide_decimal(d, d_n, base, is_neg, &norm_n, node, ctx);
     (void)zuf_parse_f64(norm, norm + norm_n, &approx);
-    return big_integer(ctx, norm, approx);
+    return big_integer(ctx, node, norm, approx);
 }
 
 /*
@@ -456,7 +483,8 @@ static bool float_value(const char* s, size_t n, double* out)
     return (r.status == ZUF_OK || r.status == ZUF_ERR_RANGE) && r.ptr == last;
 }
 
-static SEXP scalar_double(const cyaml_doc_t* doc, const cyaml_node_t* node)
+static SEXP scalar_double(
+    const cyaml_doc_t* doc, const cyaml_node_t* node, const zuyaml_ctx_t* ctx)
 {
     const char* text = cyaml_str(doc, node);
     double v;
@@ -464,15 +492,16 @@ static SEXP scalar_double(const cyaml_doc_t* doc, const cyaml_node_t* node)
     if (text != NULL && float_value(text, (size_t)cyaml_len(node), &v)) {
         return Rf_ScalarReal(v);
     }
-    return scalar_string(doc, node);
+    return scalar_string(doc, node, ctx);
 }
 
-static SEXP scalar_bool(const cyaml_doc_t* doc, const cyaml_node_t* node)
+static SEXP scalar_bool(
+    const cyaml_doc_t* doc, const cyaml_node_t* node, const zuyaml_ctx_t* ctx)
 {
     bool v;
 
     if (!cyaml_as_bool(doc, node, &v)) {
-        return scalar_string(doc, node);
+        return scalar_string(doc, node, ctx);
     }
     return Rf_ScalarLogical(v ? TRUE : FALSE);
 }
@@ -675,7 +704,7 @@ static void check_unknown_tag(zuyaml_ctx_t* ctx, const cyaml_node_t* node,
            in case it ever does not. */
         const cyaml_span_t* at = node->tag.start_line ? &node->tag
                                                       : &node->span;
-        zuyaml_stopf("unsupported_tag", NULL,
+        zuyaml_stopf_at("unsupported_tag", ctx->path, at,
             "Unsupported YAML tag '%.*s' at line %u, column %u.",
             (int)tag_n, tag, (unsigned)at->start_line,
             (unsigned)at->start_col);
@@ -699,13 +728,13 @@ static SEXP convert_scalar(const cyaml_doc_t* doc, const cyaml_node_t* node,
     /* A tag overrides schema resolution. */
     switch (classify_tag(doc, tag, (size_t)tag_n)) {
     case ZUYAML_TAG_STR:
-        return scalar_string(doc, node);
+        return scalar_string(doc, node, ctx);
     case ZUYAML_TAG_INT:
         return scalar_int(doc, node, ctx);
     case ZUYAML_TAG_FLOAT:
-        return scalar_double(doc, node);
+        return scalar_double(doc, node, ctx);
     case ZUYAML_TAG_BOOL:
-        return scalar_bool(doc, node);
+        return scalar_bool(doc, node, ctx);
     case ZUYAML_TAG_NULL:
         return R_NilValue;
     case ZUYAML_TAG_UNKNOWN:
@@ -723,20 +752,20 @@ static SEXP convert_scalar(const cyaml_doc_t* doc, const cyaml_node_t* node,
        an empty block scalar as null, so `key: >-` with no content would come
        back as NULL instead of "". */
     if (node->style != CYAML_PLAIN) {
-        return scalar_string(doc, node);
+        return scalar_string(doc, node, ctx);
     }
 
     switch (cyaml_scalar_kind(doc, node)) {
     case CYAML_KIND_NULL:
         return R_NilValue;
     case CYAML_KIND_BOOL:
-        return scalar_bool(doc, node);
+        return scalar_bool(doc, node, ctx);
     case CYAML_KIND_INT:
         return scalar_int(doc, node, ctx);
     case CYAML_KIND_FLOAT:
-        return scalar_double(doc, node);
+        return scalar_double(doc, node, ctx);
     case CYAML_KIND_STRING:
-        return scalar_string(doc, node);
+        return scalar_string(doc, node, ctx);
     }
 
     zuyaml_stopf("internal", NULL,
@@ -893,7 +922,7 @@ static SEXP key_charsxp(const cyaml_doc_t* doc, const cyaml_node_t* key,
             check_unknown_tag(ctx, k, tag, tag_n);
         }
     }
-    return scalar_charsxp(doc, k);
+    return scalar_charsxp(doc, k, ctx);
 }
 
 /*
@@ -978,7 +1007,8 @@ static int cmp_cstr(const void* a, const void* b)
  * This also catches collisions introduced by stringifying non-string scalar
  * keys, where YAML saw two distinct keys (1 and "1") but R would see one name.
  */
-static void check_unique_names(SEXP names)
+static void check_unique_names(
+    SEXP names, const cyaml_node_t* map, const zuyaml_ctx_t* ctx)
 {
     R_xlen_t n = XLENGTH(names), i;
     const char** sorted;
@@ -996,7 +1026,21 @@ static void check_unique_names(SEXP names)
 
     for (i = 1; i < n; i++) {
         if (strcmp(sorted[i - 1], sorted[i]) == 0) {
-            zuyaml_stopf("duplicate_key", NULL,
+            /* Report the second occurrence, where the duplicate is. names[k]
+               is the name of pair k. */
+            const cyaml_span_t* at = span_of(map);
+            R_xlen_t k, seen = 0;
+            for (k = 0; k < n; k++) {
+                if (strcmp(CHAR(STRING_ELT(names, k)), sorted[i]) == 0
+                    && ++seen == 2) {
+                    const cyaml_pair_t* pair = cyaml_map_at(map, (uint32_t)k);
+                    if (span_of(pair->key) != NULL) {
+                        at = span_of(pair->key);
+                    }
+                    break;
+                }
+            }
+            zuyaml_stopf_at("duplicate_key", ctx->path, at,
                 "Duplicate mapping key '%s'; set duplicate_keys = TRUE to "
                 "allow duplicates.",
                 sorted[i]);
@@ -1027,7 +1071,7 @@ static SEXP convert_map(const cyaml_doc_t* doc, const cyaml_node_t* node,
     }
 
     if (!ctx->duplicate_keys) {
-        check_unique_names(names);
+        check_unique_names(names, node, ctx);
     }
     Rf_setAttrib(out, R_NamesSymbol, names);
 
@@ -1054,6 +1098,15 @@ static SEXP convert_map(const cyaml_doc_t* doc, const cyaml_node_t* node,
  * means every expanded node is charged against max_nodes and the conversion
  * aborts as soon as the budget runs out.
  */
+/* An alias is composed with a zeroed span and its anchor span filled in. */
+static const cyaml_span_t* alias_at(const cyaml_node_t* node)
+{
+    if (node->anchor.start_line > 0) {
+        return &node->anchor;
+    }
+    return span_of(node);
+}
+
 static SEXP convert_alias(const cyaml_doc_t* doc, const cyaml_node_t* node,
     zuyaml_ctx_t* ctx, const zuyaml_anc_t* anc)
 {
@@ -1061,11 +1114,11 @@ static SEXP convert_alias(const cyaml_doc_t* doc, const cyaml_node_t* node,
     const zuyaml_anc_t* a;
 
     if (ctx->alias_error) {
-        zuyaml_stopf("alias", NULL,
+        zuyaml_stopf_at("alias", ctx->path, alias_at(node),
             "Document contains a YAML alias and aliases = \"error\".");
     }
     if (target == NULL) {
-        zuyaml_stopf("alias", NULL,
+        zuyaml_stopf_at("alias", ctx->path, alias_at(node),
             "YAML alias does not resolve to a known anchor.");
     }
 
@@ -1079,11 +1132,11 @@ static SEXP convert_alias(const cyaml_doc_t* doc, const cyaml_node_t* node,
             const cyaml_span_t* at = node->anchor.start_line ? &node->anchor
                                                              : &node->span;
             if (at->start_line > 0) {
-                zuyaml_stopf("alias_cycle", NULL,
+                zuyaml_stopf_at("alias_cycle", ctx->path, at,
                     "YAML alias cycle detected at line %u, column %u.",
                     (unsigned)at->start_line, (unsigned)at->start_col);
             }
-            zuyaml_stopf("alias_cycle", NULL,
+            zuyaml_stopf("alias_cycle", ctx->path,
                 "YAML alias cycle detected; aliases cannot refer to a node "
                 "that contains them.");
         }
@@ -1105,7 +1158,7 @@ SEXP zuyaml_convert_node(const cyaml_doc_t* doc, const cyaml_node_t* node,
        payload is small and shallow. */
     ctx->nodes += 1;
     if (ctx->max_nodes > 0 && ctx->nodes > ctx->max_nodes) {
-        zuyaml_stopf("limit_nodes", NULL,
+        zuyaml_stopf_at("limit_nodes", ctx->path, span_of(node),
             "Document exceeds the node limit (%.0f); see max_nodes.",
             ctx->max_nodes);
     }
@@ -1143,12 +1196,13 @@ SEXP zuyaml_convert_node(const cyaml_doc_t* doc, const cyaml_node_t* node,
     case CYAML_MAP: {
         SEXP out;
 
-        /* cyaml v0.1.3 never reads opts.max_depth, so the limit is enforced
-           here. Besides bounding hostile input, this is what keeps deeply
+        /* cyaml v0.1.3 never read opts.max_depth; patch 0006 makes its
+           scanner apply it to flow collections, and every collection is
+           checked here. Besides bounding hostile input, this is what keeps deeply
            nested documents from exhausting R's protection stack during this
            very recursion. */
         if (ctx->max_depth > 0 && ctx->depth >= ctx->max_depth) {
-            zuyaml_stopf("limit_depth", NULL,
+            zuyaml_stopf_at("limit_depth", ctx->path, span_of(node),
                 "YAML nesting exceeds max_depth (%u).",
                 (unsigned)ctx->max_depth);
         }

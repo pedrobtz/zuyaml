@@ -82,6 +82,7 @@ typedef struct {
     uint32_t depth; /* current nesting depth during conversion */
     double max_nodes; /* 0 = unlimited */
     double nodes; /* R nodes materialised so far */
+    SEXP path; /* the file, for conditions (#35); R_NilValue for text */
 } zuyaml_ctx_t;
 
 /*
