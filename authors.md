@@ -12,13 +12,13 @@
 Source:
 [`DESCRIPTION`](https://github.com/pedrobtz/zuyaml/blob/main/DESCRIPTION)
 
-Baltazar P (2026). *zuyaml: Parse and Emit 'YAML' 1.2*. R package
-version 0.1.0.9000, <https://github.com/pedrobtz/zuyaml>.
+Baltazar P (2026). *zuyaml: Parse and Emit YAML 1.2*. R package version
+0.1.1, <https://github.com/pedrobtz/zuyaml>.
 
     @Manual{,
-      title = {zuyaml: Parse and Emit 'YAML' 1.2},
+      title = {zuyaml: Parse and Emit YAML 1.2},
       author = {Pedro Baltazar},
       year = {2026},
-      note = {R package version 0.1.0.9000},
+      note = {R package version 0.1.1},
       url = {https://github.com/pedrobtz/zuyaml},
     }

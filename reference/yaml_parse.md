@@ -79,9 +79,9 @@ yaml_parse_all(
 
   Maximum nesting depth, or `0` for unlimited. It bounds parse time as
   well as depth, because the time to scan flow collections (`[...]`,
-  `{...}`) grows with the square of their nesting depth, so keep `0` for
-  trusted input. A document nested deeper than the C stack allows raises
-  R's `stackOverflowError` rather than crashing.
+  `{...}`) grows with the square of their nesting depth, so set it to
+  `0` only for trusted input. A document nested deeper than the C stack
+  allows raises R's `stackOverflowError` rather than crashing.
 
 - max_size:
 

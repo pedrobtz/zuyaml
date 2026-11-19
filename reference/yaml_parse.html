@@ -9,7 +9,7 @@ YAML stream and returns one element per document."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">zuyaml</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.1</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -121,8 +121,8 @@ resulting list.</p></dd>
 <dt id="arg-max-depth">max_depth<a class="anchor" aria-label="anchor" href="#arg-max-depth"></a></dt>
 <dd><p>Maximum nesting depth, or <code>0</code> for unlimited. It bounds
 parse time as well as depth, because the time to scan flow collections
-(<code>[...]</code>, <code>{...}</code>) grows with the square of their nesting depth, so keep
-<code>0</code> for trusted input. A document nested deeper than the C stack allows
+(<code>[...]</code>, <code>{...}</code>) grows with the square of their nesting depth, so set
+it to <code>0</code> only for trusted input. A document nested deeper than the C stack allows
 raises R's <code>stackOverflowError</code> rather than crashing.</p></dd>
 
 
