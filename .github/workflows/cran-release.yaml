@@ -1,0 +1,29 @@
+# Tags each CRAN submission and opens the development-version bump.
+# Commit CRAN-SUBMISSION after `devtools::submit_cran()`; that push is the
+# whole release step (r-actions README, "cran-release.yml"):
+#
+#   * the submitted commit (the file's SHA) is tagged with the bare version,
+#     `0.1.1`, and the release `zuyaml 0.1.1` is created from NEWS.md;
+#   * a pull request bumps main to `<version>.9000`. Merge it only after CRAN
+#     accepts (workflow rules, Versioning).
+#
+# Keep CRAN-SUBMISSION in .Rbuildignore, not .gitignore. A resubmission
+# rewrites the file, and committing it moves the tag.
+#
+# Pinned to a commit, not @v1, because the token here can write: a moved tag
+# must not change what runs with that permission (ci.md, Workflows).
+on:
+  push:
+    branches: [main]
+    paths: [CRAN-SUBMISSION]
+  workflow_dispatch:
+
+name: cran-release.yaml
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  cran-release:
+    uses: pedrobtz/r-actions/.github/workflows/cran-release.yml@ae59a2805e622e9ba0f3e902bc5f39eba33c6670 # v1.45.1
