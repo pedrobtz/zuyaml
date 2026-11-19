@@ -1,9 +1,10 @@
-#include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <zufast/number.h>
 
 #include "zuyaml.h"
 
@@ -228,33 +229,70 @@ static SEXP big_integer(zuyaml_ctx_t* ctx, const char* digits, double approx)
     }
 }
 
+/*
+ * Read a YAML integer's sign and magnitude: [-+]? followed by decimal digits,
+ * 0x and hex digits, or 0o and octal digits. These are the forms cyaml's
+ * resolver classifies as integers, and the forms cyaml_str_to_i64() accepted
+ * before zufast replaced it (#14). The span is read in place: zufast needs no
+ * terminator, so nothing is copied.
+ *
+ * Returns ZUF_OK with the magnitude set, ZUF_ERR_RANGE for a well-formed
+ * integer beyond uint64, or ZUF_ERR_INVALID for anything else.
+ */
+static zuf_status int_magnitude(
+    const char* s, size_t n, bool* neg, uint64_t* mag)
+{
+    const char* p = s;
+    const char* last = s + n;
+    zuf_num_options opt = { 0, 10, 0 };
+    zuf_result r;
+
+    *neg = false;
+    if (p < last && (*p == '-' || *p == '+')) {
+        *neg = (*p == '-');
+        p++;
+    }
+    if (last - p >= 2 && p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+        opt.base = 16;
+        p += 2;
+    } else if (last - p >= 2 && p[0] == '0' && (p[1] == 'o' || p[1] == 'O')) {
+        opt.base = 8;
+        p += 2;
+    }
+    if (p == last) {
+        return ZUF_ERR_INVALID;
+    }
+    /* Unsigned, and without ZUF_NUM_LEADING_PLUS, so a second sign is
+       refused: "--1" and "0x-5" are not integers. */
+    r = zuf_parse_u64_opt(p, last, mag, &opt);
+    if (r.status == ZUF_ERR_INVALID || r.ptr != last) {
+        return ZUF_ERR_INVALID;
+    }
+    return r.status;
+}
+
 static SEXP scalar_int(const cyaml_doc_t* doc, const cyaml_node_t* node,
     zuyaml_ctx_t* ctx)
 {
     char digits[32];
-    int64_t v;
-    uint64_t uv;
+    const char* text = cyaml_str(doc, node);
+    uint32_t text_n = cyaml_len(node);
+    bool is_neg;
+    uint64_t mag;
 
-    if (cyaml_as_int(doc, node, &v)) {
-        /* NA_INTEGER is INT_MIN, so it is not available as a value. */
-        if (v > (int64_t)INT_MIN && v <= (int64_t)INT_MAX) {
-            return Rf_ScalarInteger((int)v);
+    if (text != NULL
+        && int_magnitude(text, (size_t)text_n, &is_neg, &mag) == ZUF_OK
+        && (!is_neg || mag <= (uint64_t)INT64_MAX + 1u)) {
+        /* NA_INTEGER is INT_MIN, so -2^31 is not available as an integer. */
+        if (mag <= (uint64_t)INT_MAX) {
+            return Rf_ScalarInteger(is_neg ? -(int)mag : (int)mag);
         }
-        if (v >= -(int64_t)ZUYAML_MAX_EXACT_DOUBLE
-            && v <= (int64_t)ZUYAML_MAX_EXACT_DOUBLE) {
-            return Rf_ScalarReal((double)v);
+        if (mag <= (uint64_t)ZUYAML_MAX_EXACT_DOUBLE) {
+            return Rf_ScalarReal(is_neg ? -(double)mag : (double)mag);
         }
-        snprintf(digits, sizeof(digits), "%" PRId64, v);
-        return big_integer(ctx, digits, (double)v);
-    }
-
-    /* Above INT64_MAX, cyaml_as_int fails but cyaml_as_uint may succeed. */
-    if (cyaml_as_uint(doc, node, &uv)) {
-        if (uv <= (uint64_t)ZUYAML_MAX_EXACT_DOUBLE) {
-            return Rf_ScalarReal((double)uv);
-        }
-        snprintf(digits, sizeof(digits), "%" PRIu64, uv);
-        return big_integer(ctx, digits, (double)uv);
+        snprintf(digits, sizeof(digits), "%s%" PRIu64, is_neg ? "-" : "",
+            mag);
+        return big_integer(ctx, digits, is_neg ? -(double)mag : (double)mag);
     }
 
     /* Beyond uint64 entirely. Only the source text is available, so it is used
@@ -303,7 +341,11 @@ static SEXP scalar_int(const cyaml_doc_t* doc, const cyaml_node_t* node,
 
         /* The approximation has to come from the text: the value is beyond
            every integer type here, so there is nothing else to convert. */
-        return big_integer(ctx, norm, atof(norm));
+        {
+            double approx;
+            (void)zuf_parse_f64(norm, norm + norm_n, &approx);
+            return big_integer(ctx, norm, approx);
+        }
     }
 }
 
@@ -319,71 +361,82 @@ static SEXP scalar_int(const cyaml_doc_t* doc, const cyaml_node_t* node,
  * honoured at all.
  */
 /*
- * Convert a float that cyaml refused because the value is out of range.
+ * Convert a float scalar's text to a double.
  *
- * `cyaml_str_to_f64()` treats a non-zero `errno` as failure, and `strtod()`
- * sets `ERANGE` for overflow, for underflow to zero, **and** for any subnormal
- * result. So `1e309`, `1e-324` and the perfectly representable `1e-323` were
- * all handed back as *character strings*: a field's R type depended on the
- * magnitude of its value, which is the one thing the design's `simplify`
- * argument says must never happen. A caller reading `timeout: 1e308` got a
- * double and the same caller reading `timeout: 1e309` got a string.
+ * The special values come first, in the spellings cyaml's resolver classifies
+ * as floats (.inf, +.inf, -.inf, .nan, compared without regard to case). They
+ * are YAML spellings, not number syntax.
  *
- * `ERANGE` is exactly the case where the answer is well defined -- C requires
- * strtod to return the nearest representable value, so +-HUGE_VAL, zero, or
- * the subnormal -- and it is the value R's own reader gives for the same text.
- * Sharing that rule with `zujson`, which states it as "generous about numbers,
- * strict about text": one absurd number should not change the type of a field,
- * let alone invalidate a document.
+ * Everything else must be the core schema's decimal float,
+ * [-+]?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?, which is zufast's
+ * default grammar with a leading '+' allowed, once its "inf" and "nan" words
+ * are kept out by requiring a digit or a point after the sign. The whole span
+ * must be consumed. Before zufast (#14), strtod() also took C's spellings
+ * under `!!float`: 0x10, 0x1p3, inf, nan and infinity. None is YAML, so they
+ * are strings now, as `!!float 0o17` always was.
  *
- * Text that is not a number at all still falls back to a string, which is what
- * an unresolvable scalar is in YAML -- that is the `!!float abc` path below,
- * and it is unaffected.
+ * zufast rounds correctly on every platform. Out of range is not a failure:
+ * the value is then the nearest double, +-Inf or +-0, already written, which
+ * is the rule zuyaml shares with zujson ("generous about numbers, strict about
+ * text"), so a field's R type never depends on its magnitude. That used to
+ * need a second strtod() pass, because cyaml_str_to_f64() treated ERANGE,
+ * which strtod() sets even for a representable subnormal, as failure.
  */
-static bool out_of_range_double(
-    const cyaml_doc_t* doc, const cyaml_node_t* node, double* out)
+static bool ascii_ieq(const char* s, size_t n, const char* lit)
 {
-    const char* raw = cyaml_str(doc, node);
-    uint32_t raw_n = cyaml_len(node);
-    char stack_buf[64];
-    char* text;
-    char* endp;
-    double v;
+    size_t i;
 
-    if (raw == NULL || raw_n == 0) {
+    if (strlen(lit) != n) {
         return false;
     }
-    /* The span is not NUL-terminated, and strtod() needs it to be. A long one
-       is legitimate (0.000...1), so it is copied rather than bounded. */
-    text = ((size_t)raw_n < sizeof(stack_buf))
-        ? stack_buf
-        : (char*)R_alloc((size_t)raw_n + 1u, 1); /* freed when .Call returns */
-    memcpy(text, raw, (size_t)raw_n);
-    text[raw_n] = '\0';
-
-    /* R guarantees LC_NUMERIC is "C", so the decimal separator is a point.
-       zuyaml_emit.c relies on the same guarantee when formatting doubles. */
-    errno = 0;
-    v = strtod(text, &endp);
-    if (endp == text || *endp != '\0') {
-        return false; /* not a number; a string, as YAML says */
+    for (i = 0; i < n; i++) {
+        char c = s[i];
+        if (c >= 'A' && c <= 'Z') {
+            c = (char)(c - 'A' + 'a');
+        }
+        if (c != lit[i]) {
+            return false;
+        }
     }
-    if (errno != 0 && errno != ERANGE) {
-        return false;
-    }
-    *out = v;
     return true;
+}
+
+static bool float_value(const char* s, size_t n, double* out)
+{
+    const char* p = s;
+    const char* last = s + n;
+    zuf_num_options opt = { ZUF_NUM_LEADING_PLUS, 0, 0 };
+    zuf_result r;
+
+    if (ascii_ieq(s, n, ".nan")) {
+        *out = R_NaN;
+        return true;
+    }
+    if (ascii_ieq(s, n, ".inf") || ascii_ieq(s, n, "+.inf")) {
+        *out = R_PosInf;
+        return true;
+    }
+    if (ascii_ieq(s, n, "-.inf")) {
+        *out = R_NegInf;
+        return true;
+    }
+
+    if (p < last && (*p == '-' || *p == '+')) {
+        p++;
+    }
+    if (p == last || !((*p >= '0' && *p <= '9') || *p == '.')) {
+        return false;
+    }
+    r = zuf_parse_f64_opt(s, last, out, &opt);
+    return (r.status == ZUF_OK || r.status == ZUF_ERR_RANGE) && r.ptr == last;
 }
 
 static SEXP scalar_double(const cyaml_doc_t* doc, const cyaml_node_t* node)
 {
+    const char* text = cyaml_str(doc, node);
     double v;
 
-    /* Handles .inf, -.inf and .nan. */
-    if (cyaml_as_float(doc, node, &v)) {
-        return Rf_ScalarReal(v);
-    }
-    if (out_of_range_double(doc, node, &v)) {
+    if (text != NULL && float_value(text, (size_t)cyaml_len(node), &v)) {
         return Rf_ScalarReal(v);
     }
     return scalar_string(doc, node);

@@ -468,6 +468,22 @@ depended on the magnitude of its value** — which is precisely what §6.1's
 Generosity applies to *numbers only*. Text that is not a number is still a
 string, so `!!float abc` is `"abc"` and `1e309 and more` is a string.
 
+**Numbers are converted by zufast** (decided 2026-11-19, #14). `zufast`'s span
+parsers replace `strtod()`, `cyaml_as_int()` and `cyaml_as_float()`:
+`zuf_parse_f64()` for floats, correctly rounded on every platform, and
+`zuf_parse_u64()` in base 10, 16 or 8 for the integer forms. The rules above
+do not change: on `ZUF_ERR_RANGE` zufast has already written the nearest
+double, which is the out-of-range rule as it stands. What `!!float` accepts
+does change. Under `strtod()` it took C's spellings too: `!!float 0x10` was
+16, `!!float 0x1p3` was 8, and `!!float inf`, `nan` and `infinity` were
+`Inf` and `NaN`, while `!!float 0o17` was already a string. Now `!!float`
+accepts the core schema float syntax and its `.inf`/`.nan` spellings only,
+and the rest are strings, as non-conforming text is under every other core
+tag. Plain-scalar resolution was never affected: cyaml's resolver classifies
+none of those spellings as a float. The emitter keeps its `%.15g`–`%.17g`
+search for the shortest text that reads back, checking each candidate with
+`zuf_parse_f64()`, so its output is unchanged.
+
 **Where this does not follow `zujson`:** an integer beyond 2^53 is a
 `zuyaml_bigint` here and the nearest double there. That is deliberate, and the
 difference is the medium. `zujson` reads HTTP response bodies, where a wide
@@ -1601,6 +1617,7 @@ exists.
 | YPATH | deferred to a document API |
 | HTTP knowledge | none |
 | Runtime dependencies | none beyond R |
+| Number conversion | `zufast` through `LinkingTo:` (header-only, no runtime dependency) |
 | Conformance suite | curated subset on CRAN, full suite in CI |
 
 ---

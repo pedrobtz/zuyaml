@@ -124,8 +124,11 @@ from one that is not.
   found in M6.5.
 - **Doubles are formatted by zuyaml,** not by `cyaml_new_float()` (`%g`, six
   digits). An out-of-range float becomes the nearest double, never a string
-  (`out_of_range_double()` in `zuyaml_convert.c`), so a field's R type never
-  depends on its magnitude.
+  (`float_value()` in `zuyaml_convert.c`), so a field's R type never depends
+  on its magnitude.
+- **Numbers go through zufast, never `strtod()` or `cyaml_as_int()`/
+  `cyaml_as_float()`** (`LinkingTo: zufast`, design §6.2 Float). `nm -u` on
+  `src/zuyaml_*.o` should list no `strto*` or `atof`.
 - **A new upstream error code must fail loudly** in the §10.1 mapping, not
   fall through to a default.
 - **Never define `CYAML_DEBUG` or `CYAML_TRACE`:** they enable `printf()` and

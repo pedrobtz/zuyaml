@@ -1,5 +1,12 @@
 # zuyaml (development version)
 
+* Numbers are converted by the header-only zufast package (`LinkingTo:`), not
+  by the C library's `strtod()`, so floats are correctly rounded on every
+  platform. Under an explicit `!!float` tag, text that is C number syntax but
+  not YAML float syntax is now a string, as under every other core tag:
+  `!!float 0x10`, `!!float 0x1p3` and `!!float inf` used to give 16, 8 and
+  `Inf` (#14).
+
 # zuyaml 0.1.0
 
 First release. The API is complete and the package is well tested, but it is

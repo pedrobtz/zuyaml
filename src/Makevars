@@ -10,3 +10,7 @@
 # fprintf(stderr) paths in the vendored sources, which CRAN prohibits.
 
 PKG_CPPFLAGS = -DCYAML_VERSION_STR=\"0.1.3\"
+
+# zufast is header-only (LinkingTo), so every function it provides is static
+# inline and compiles into this object; nothing needs exporting but R_init_zuyaml.
+PKG_CFLAGS = $(C_VISIBILITY)
