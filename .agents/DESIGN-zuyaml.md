@@ -443,6 +443,16 @@ it is returned to users it is public API, and it ships with `format()`, `print()
 `zuyaml_bigint()`. A class with no methods that prints its `attr(,"class")` is not
 acceptable UX for a value users will hit unpredictably.
 
+**Every base, every magnitude** (2026-11-19, #31). A hex or octal integer
+beyond uint64, or a negative one below -2^63, is a `zuyaml_bigint` holding its
+decimal value, like the decimal spelling, under the same `big_integers`
+policy. 0.1.0 returned such literals as strings, so the R type depended on
+the spelling. Their decimal form needs a base conversion, quadratic in the
+number of digits, so a hex or octal literal of more than 4096 digits (16,384
+bits) is refused with `"limit_size"` rather than returned as a string.
+Decimal literals of any length are copied, not converted, and are bounded
+only by `max_size`.
+
 A future version may integrate with an external 64-bit integer class. The core
 package must not require one.
 

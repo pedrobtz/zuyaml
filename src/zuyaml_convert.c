@@ -11,21 +11,6 @@
 /* Largest integer exactly representable as an IEEE-754 double. */
 #define ZUYAML_MAX_EXACT_DOUBLE 9007199254740992.0
 
-static bool all_digits(const char* s, size_t n)
-{
-    size_t i;
-
-    if (n == 0) {
-        return false;
-    }
-    for (i = 0; i < n; i++) {
-        if (s[i] < '0' || s[i] > '9') {
-            return false;
-        }
-    }
-    return true;
-}
-
 _Noreturn static void stop_embedded_nul(const cyaml_node_t* node)
 {
     zuyaml_stopf_at("embedded_nul", NULL, &node->span,
@@ -237,10 +222,11 @@ static SEXP big_integer(zuyaml_ctx_t* ctx, const char* digits, double approx)
  * terminator, so nothing is copied.
  *
  * Returns ZUF_OK with the magnitude set, ZUF_ERR_RANGE for a well-formed
- * integer beyond uint64, or ZUF_ERR_INVALID for anything else.
+ * integer beyond uint64, or ZUF_ERR_INVALID for anything else. On the first
+ * two, `digits` is the digit span after any sign and prefix, in `base`.
  */
-static zuf_status int_magnitude(
-    const char* s, size_t n, bool* neg, uint64_t* mag)
+static zuf_status int_magnitude(const char* s, size_t n, bool* neg,
+    uint64_t* mag, const char** digits, size_t* digits_n, int* base)
 {
     const char* p = s;
     const char* last = s + n;
@@ -262,6 +248,9 @@ static zuf_status int_magnitude(
     if (p == last) {
         return ZUF_ERR_INVALID;
     }
+    *digits = p;
+    *digits_n = (size_t)(last - p);
+    *base = opt.base;
     /* Unsigned, and without ZUF_NUM_LEADING_PLUS, so a second sign is
        refused: "--1" and "0x-5" are not integers. */
     r = zuf_parse_u64_opt(p, last, mag, &opt);
@@ -271,18 +260,98 @@ static zuf_status int_magnitude(
     return r.status;
 }
 
+/*
+ * Hex and octal digits beyond uint64 have no machine type to go through, so
+ * their decimal form is computed by schoolbook conversion into base-10^9
+ * limbs (#31). That costs O(digits^2), so a literal is bounded: 4096 hex
+ * digits is 16,384 bits, about a million limb steps, and far beyond any
+ * integer a configuration file holds. Longer is limit_size, not a string, so
+ * the R type still never depends on the spelling.
+ */
+#define ZUYAML_MAX_WIDE_DIGITS 4096u
+
+static const char* wide_decimal(
+    const char* d, size_t n, int base, bool neg, size_t* out_n)
+{
+    char* out;
+    size_t len = 0;
+
+    while (n > 1 && d[0] == '0') { /* leading zeros: +007 is 7 */
+        d++;
+        n--;
+    }
+    if (base == 10) {
+        out = (char*)R_alloc(n + 2u, 1); /* freed when .Call returns */
+        if (neg) {
+            out[len++] = '-';
+        }
+        memcpy(out + len, d, n);
+        len += n;
+    } else {
+        size_t cap, used = 1, i, k;
+        uint32_t* limb;
+
+        if (n > ZUYAML_MAX_WIDE_DIGITS) {
+            zuyaml_stopf("limit_size", NULL,
+                "A base-%d integer literal of %.0f digits is longer than "
+                "zuyaml converts (%u).",
+                base, (double)n, ZUYAML_MAX_WIDE_DIGITS);
+        }
+        /* log10(16) / 9 < 0.14 limbs per hex digit, and less for octal. */
+        cap = n / 7u + 2u;
+        limb = (uint32_t*)R_alloc(cap, sizeof(uint32_t));
+        limb[0] = 0;
+        for (i = 0; i < n; i++) {
+            char c = d[i];
+            uint64_t carry = (uint64_t)((c >= '0' && c <= '9') ? c - '0'
+                    : (c >= 'a' && c <= 'f')                ? c - 'a' + 10
+                                                            : c - 'A' + 10);
+            for (k = 0; k < used; k++) {
+                uint64_t t = (uint64_t)limb[k] * (uint64_t)base + carry;
+                limb[k] = (uint32_t)(t % 1000000000u);
+                carry = t / 1000000000u;
+            }
+            if (carry > 0) {
+                limb[used++] = (uint32_t)carry;
+            }
+        }
+        out = (char*)R_alloc(used * 9u + 3u, 1);
+        if (neg) {
+            out[len++] = '-';
+        }
+        len += (size_t)snprintf(out + len, 12, "%" PRIu32, limb[used - 1]);
+        for (k = used - 1; k-- > 0;) {
+            len += (size_t)snprintf(out + len, 10, "%09" PRIu32, limb[k]);
+        }
+    }
+    out[len] = '\0';
+    *out_n = len;
+    return out;
+}
+
 static SEXP scalar_int(const cyaml_doc_t* doc, const cyaml_node_t* node,
     zuyaml_ctx_t* ctx)
 {
     char digits[32];
     const char* text = cyaml_str(doc, node);
     uint32_t text_n = cyaml_len(node);
-    bool is_neg;
-    uint64_t mag;
+    bool is_neg = false;
+    uint64_t mag = 0;
+    const char* d = NULL;
+    size_t d_n = 0, norm_n;
+    int base = 10;
+    zuf_status st;
+    const char* norm;
+    double approx;
 
-    if (text != NULL
-        && int_magnitude(text, (size_t)text_n, &is_neg, &mag) == ZUF_OK
-        && (!is_neg || mag <= (uint64_t)INT64_MAX + 1u)) {
+    /* An explicit !!int tag reaches here on any text, so the text is
+       validated rather than trusted: `!!int 1 - 3` is a string, which is
+       what an unresolvable scalar is. */
+    if (text == NULL) {
+        return scalar_string(doc, node);
+    }
+    st = int_magnitude(text, (size_t)text_n, &is_neg, &mag, &d, &d_n, &base);
+    if (st == ZUF_OK) {
         /* NA_INTEGER is INT_MIN, so -2^31 is not available as an integer. */
         if (mag <= (uint64_t)INT_MAX) {
             return Rf_ScalarInteger(is_neg ? -(int)mag : (int)mag);
@@ -294,59 +363,15 @@ static SEXP scalar_int(const cyaml_doc_t* doc, const cyaml_node_t* node,
             mag);
         return big_integer(ctx, digits, is_neg ? -(double)mag : (double)mag);
     }
-
-    /* Beyond uint64 entirely. Only the source text is available, so it is used
-       as-is; such a literal is decimal in practice, since hex and octal forms
-       are handled above.
-       
-       This is also reachable when an explicit !!int tag is attached to text
-       that is not an integer at all, so the text is validated rather than
-       trusted: otherwise `!!int 1 - 3` would become a zuyaml_bigint holding
-       "1 - 3". Anything that is not a decimal integer falls back to a
-       string, which is what an unresolvable scalar is. */
-    {
-        const char* raw = cyaml_str(doc, node);
-        uint32_t raw_n = cyaml_len(node);
-        uint32_t k, z;
-        bool neg;
-        size_t norm_n;
-        char* norm;
-
-        if (raw == NULL || raw_n == 0) {
-            return scalar_string(doc, node);
-        }
-        neg = (raw[0] == '-');
-        k = (neg || raw[0] == '+') ? 1u : 0u;
-        if (k >= raw_n || !all_digits(raw + k, (size_t)(raw_n - k))) {
-            return scalar_string(doc, node);
-        }
-
-        /* Normalise to the decimal form mk_bigint promises: no leading '+',
-           no leading zeros, so that +007 and 7 give identical values. The
-           text is copied rather than used in place, both because the span is
-           not NUL-terminated and because the sign may have to be dropped. */
-        z = k;
-        while (z + 1u < raw_n && raw[z] == '0') {
-            z++;
-        }
-        norm_n = (size_t)(raw_n - z) + (neg ? 1u : 0u);
-        norm = (norm_n < sizeof(digits))
-            ? digits
-            : (char*)R_alloc(norm_n + 1u, 1); /* freed when .Call returns */
-        if (neg) {
-            norm[0] = '-';
-        }
-        memcpy(norm + (neg ? 1u : 0u), raw + z, (size_t)(raw_n - z));
-        norm[norm_n] = '\0';
-
-        /* The approximation has to come from the text: the value is beyond
-           every integer type here, so there is nothing else to convert. */
-        {
-            double approx;
-            (void)zuf_parse_f64(norm, norm + norm_n, &approx);
-            return big_integer(ctx, norm, approx);
-        }
+    if (st != ZUF_ERR_RANGE) {
+        return scalar_string(doc, node);
     }
+
+    /* Beyond uint64, in any base (#31): the decimal normalisation
+       mk_bigint promises, and the nearest double parsed from it. */
+    norm = wide_decimal(d, d_n, base, is_neg, &norm_n);
+    (void)zuf_parse_f64(norm, norm + norm_n, &approx);
+    return big_integer(ctx, norm, approx);
 }
 
 /*
