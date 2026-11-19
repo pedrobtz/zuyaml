@@ -114,7 +114,13 @@ from one that is not.
   rchk found exactly this in `build_node()`, which nothing else caught.
 - **cyaml ignores `dup_keys`, `max_depth` and `max_size`** and never raises
   `CYAML_ERR_DUP_KEY`. zuyaml enforces all three itself; do not hand them to
-  cyaml and assume they work.
+  cyaml and assume they work. The one exception is patch 0006: the scanner
+  honours `max_depth` for flow collections, because scanning them is
+  quadratic in their depth (#28).
+- **Every C recursion over a document or an R object calls
+  `R_CheckStack()`** once per level (`convert_node()`, `build_node()`), so
+  running out of stack is R's `stackOverflowError`, not a crash (#8).
+  cyaml's parser and emitter are iterative.
 - **Scan for NUL before parsing and during conversion, and skip a leading
   BOM:** the parser treats a literal NUL as end of input and drops the rest
   silently, and leaves a BOM inside the first scalar.
@@ -124,8 +130,11 @@ from one that is not.
   found in M6.5.
 - **Doubles are formatted by zuyaml,** not by `cyaml_new_float()` (`%g`, six
   digits). An out-of-range float becomes the nearest double, never a string
-  (`out_of_range_double()` in `zuyaml_convert.c`), so a field's R type never
-  depends on its magnitude.
+  (`float_value()` in `zuyaml_convert.c`), so a field's R type never depends
+  on its magnitude.
+- **Numbers go through zufast, never `strtod()` or `cyaml_as_int()`/
+  `cyaml_as_float()`** (`LinkingTo: zufast`, design §6.2 Float). `nm -u` on
+  `src/zuyaml_*.o` should list no `strto*` or `atof`.
 - **A new upstream error code must fail loudly** in the §10.1 mapping, not
   fall through to a default.
 - **Never define `CYAML_DEBUG` or `CYAML_TRACE`:** they enable `printf()` and
@@ -167,19 +176,24 @@ and on demand. rchk stays permanently, because it alone found the
 `build_node()` PROTECT bug.
 
 Package-owned: `hardening.yaml` fetches the full yaml-test-suite and runs the
-suite, `tools/conformance.R` and the fuzz cases, weekly and on push.
-`pkgdown.yaml` builds the site.
-
-Open CI gaps: #9 (no `vendor.yml`, so nothing guards hand edits to
-`src/cyaml*.c`) and #7 (`-Wextra` no longer runs anywhere).
+suite, `tools/conformance.R` and the fuzz cases, and `tools/ci/stack-depth.sh`
+(nesting depth under 8 MB, 1 MB and 256 KB stacks, with the measured margin
+over `max_depth`), weekly and on every pull request. `warnings.yaml` compiles
+our own C sources (not the vendored ones) with GCC and clang at `-Wextra
+-Wconversion -Werror` through `tools/ci/compile-warnings.sh`, which runs the
+same locally. `vendor.yaml` calls r-actions' `vendor.yml`:
+`tools/verify-vendor` rebuilds `src/cyaml*` from the pinned commit plus
+`tools/patches/` and requires it byte for byte, so a hand edit to a vendored
+file fails on its pull request. `pkgdown.yaml` builds the site.
 
 ## Vendored native code
 
 cyaml (`andrewmd5/cyaml`), MIT, tag `v0.1.3`, commit `0672e81b`, vendored
-2026-09-08. `inst/cyaml-VERSION` is the generated record;
-`tools/vendor-cyaml.sh` verifies each upstream file against its own SHA-256
-manifest, because GitHub archives are not byte-stable. Five mandatory patches
-in `tools/patches/`, each explained in its `README.md`:
+2026-09-08, re-vendored 2026-11-19 to add patch 0006. `inst/cyaml-VERSION` is
+the generated record; `tools/vendor-cyaml.sh` verifies each upstream file
+against its own SHA-256 manifest, because GitHub archives are not
+byte-stable. Six mandatory patches in `tools/patches/`, each explained in its
+`README.md`:
 
 - 0001 routes `CYAML_ASSERT` and `CYAML_UNREACHABLE` to `zuyaml_panic()`
   instead of `fprintf(stderr)` and `abort()`. It leaks on that path, which is
@@ -190,6 +204,8 @@ in `tools/patches/`, each explained in its `README.md`:
 - 0004 fixes `cyaml_str_to_i64()` at `INT64_MIN`.
 - 0005 makes `cyaml_scalar_str()` return a built node's span verbatim, so
   emitted strings keep their line breaks.
+- 0006 makes the scanner honour `opts.max_depth` for flow collections, with
+  a new `CYAML_ERR_DEPTH` that zuyaml maps to `limit_depth` (#28).
 
 Keep upstream recognisable: no reformatting or renaming, and every change as
 a patch. Four upstream bugs are recorded in `STATUS.md` but not yet reported.

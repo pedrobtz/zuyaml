@@ -1,9 +1,12 @@
 #include <ctype.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <zufast/number.h>
 
 #include "zuyaml.h"
 
@@ -27,6 +30,26 @@ static SEXP doc_own(cyaml_doc_t* doc)
 {
     SEXP owner = PROTECT(R_MakeExternalPtr(doc, R_NilValue, R_NilValue));
     R_RegisterCFinalizerEx(owner, doc_finalizer, TRUE);
+    UNPROTECT(1);
+    return owner;
+}
+
+/* The emitted text is malloc()ed by cyaml and must survive the allocating
+   Rf_mkCharLenCE() call that copies it, so it is owned the same way (#8):
+   unowned, it leaked whenever that call raised an error. */
+static void text_finalizer(SEXP owner)
+{
+    char* text = (char*)R_ExternalPtrAddr(owner);
+    if (text != NULL) {
+        free(text);
+        R_ClearExternalPtr(owner);
+    }
+}
+
+static SEXP text_own(char* text)
+{
+    SEXP owner = PROTECT(R_MakeExternalPtr(text, R_NilValue, R_NilValue));
+    R_RegisterCFinalizerEx(owner, text_finalizer, TRUE);
     UNPROTECT(1);
     return owner;
 }
@@ -281,7 +304,9 @@ static void format_double(double v, char* buf, size_t buf_n)
 
     for (prec = 15; prec <= 17; prec++) {
         snprintf(buf, buf_n, "%.*g", prec, v);
-        if (strtod(buf, NULL) == v) {
+        double back;
+        zuf_result r = zuf_parse_f64(buf, buf + strlen(buf), &back);
+        if (r.status == ZUF_OK && back == v) {
             break;
         }
     }
@@ -347,7 +372,7 @@ static cyaml_node_t* build_element(cyaml_doc_t* doc, SEXP x, R_xlen_t i)
     }
     default:
         zuyaml_stopf("unsupported_type", NULL,
-            "Cannot emit an R object of type '%s'.", Rf_type2char(TYPEOF(x)));
+            "Cannot emit an R object of type '%s'.", Rf_type2char((SEXPTYPE)TYPEOF(x)));
     }
 }
 
@@ -491,6 +516,14 @@ static cyaml_node_t* build_node(cyaml_doc_t* doc, SEXP x)
 {
     SEXP names;
 
+    /* This recursion follows the R object, and yaml_emit() has no depth
+       limit, so a deeply nested list would otherwise overflow the C stack and
+       take the session with it (#8): about 50,000 levels on an 8 MB stack.
+       R_CheckStack() raises R's stackOverflowError instead, which unwinds
+       safely because the document under construction is owned by an
+       external pointer (design 9.3). cyaml's emitter itself is iterative. */
+    R_CheckStack();
+
     if (x == R_NilValue) {
         return new_null_node(doc);
     }
@@ -526,7 +559,7 @@ static cyaml_node_t* build_node(cyaml_doc_t* doc, SEXP x)
         break;
     default:
         zuyaml_stopf("unsupported_type", NULL,
-            "Cannot emit an R object of type '%s'.", Rf_type2char(TYPEOF(x)));
+            "Cannot emit an R object of type '%s'.", Rf_type2char((SEXPTYPE)TYPEOF(x)));
     }
 
     /* An S3/S4 object of an unrecognised class is refused rather than being
@@ -566,7 +599,7 @@ SEXP zuyaml_emit_(SEXP x, SEXP indent, SEXP width, SEXP document_start,
     cyaml_doc_t* doc;
     cyaml_emit_opts_t opts = CYAML_EMIT_DEFAULT;
     cyaml_node_t* root;
-    SEXP owner, out;
+    SEXP owner, text_owner, out;
     char* text;
     size_t len = 0;
 
@@ -594,13 +627,22 @@ SEXP zuyaml_emit_(SEXP x, SEXP indent, SEXP width, SEXP document_start,
     if (text == NULL) {
         zuyaml_stopf("emit", NULL, "Could not emit the YAML document.");
     }
+    text_owner = PROTECT(text_own(text));
 
+    /* An R string holds at most INT_MAX bytes. A cast would wrap, and the
+       error would be R's "negative length vectors" (#8). */
+    if (len > (size_t)INT_MAX) {
+        zuyaml_stopf("limit_size", NULL,
+            "The emitted YAML is %.0f bytes, more than an R string can hold "
+            "(%d).",
+            (double)len, INT_MAX);
+    }
     out = PROTECT(Rf_ScalarString(Rf_mkCharLenCE(text, (int)len, CE_UTF8)));
-    free(text);
 
+    text_finalizer(text_owner);
     /* Must be doc_release, not the parser's stream release: the pointer here
        is a cyaml_doc_t and freeing it as a stream would be type confusion. */
     doc_release(owner);
-    UNPROTECT(2);
+    UNPROTECT(3);
     return out;
 }

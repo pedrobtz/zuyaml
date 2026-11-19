@@ -2,6 +2,10 @@
 #include <R.h>
 #include <Rinternals.h>
 
+/* The declaration the patched CYAML_ASSERT calls through, so a signature that
+   drifts from it is a compile error here rather than undefined behaviour. */
+#include "cyaml_internal.h"
+
 /*
  * Backstop for violated cyaml library invariants.
  *

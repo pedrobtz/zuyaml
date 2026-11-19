@@ -27,7 +27,8 @@ BugReports: https://github.com/pedrobtz/zuyaml/issues
 Encoding: UTF-8
 Language: en-GB
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 8.0.0
+LinkingTo:
+    zufast
 Suggests:
     jsonlite,
     knitr,
@@ -35,3 +36,4 @@ Suggests:
     testthat (>= 3.0.0),
     withr
 Config/testthat/edition: 3
+Config/roxygen2/version: 8.1.1

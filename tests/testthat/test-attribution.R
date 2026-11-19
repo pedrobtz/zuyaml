@@ -4,11 +4,6 @@
 # `ctb` / `cph` roles in Authors@R. These tests guard that setup against a
 # future DESCRIPTION edit or a usethis regeneration quietly dropping it.
 
-authors_at_r <- function() {
-  field <- utils::packageDescription("zuyaml", fields = "Authors@R")
-  eval(parse(text = field))
-}
-
 test_that("the bundled cyaml author is credited as contributor and copyright holder", {
   authors <- authors_at_r()
   sampson <- Filter(function(p) identical(p$family, "Sampson"), authors)

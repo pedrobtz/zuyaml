@@ -8,6 +8,11 @@
 #' preserved; see `vignette("zuyaml")` for the conversions that do not round
 #' trip.
 #'
+#' There is no depth limit: `x` is an R object, already in memory. A list
+#' nested deeper than the C stack allows raises R's `stackOverflowError`, and
+#' output longer than an R string can hold (2^31 - 1 bytes) is an error with
+#' `code` `"limit_size"`.
+#'
 #' @param x An R object. `yaml_emit_all()` takes a list, one element per
 #'   document.
 #' @param indent Spaces per indentation level, 1 to 255.

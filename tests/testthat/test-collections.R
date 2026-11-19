@@ -77,8 +77,9 @@ test_that("stringification collisions are caught", {
 test_that("max_depth is enforced by zuyaml, since cyaml ignores it", {
   # cyaml v0.1.3 declares opts.max_depth and never reads it: a document 20000
   # levels deep parses happily with max_depth = 10. The limit is applied during
-  # conversion instead, which also keeps deep nesting from exhausting R's
-  # protection stack.
+  # conversion, which also keeps deep nesting from exhausting R's protection
+  # stack, and patch 0006 makes the scanner apply it to flow collections too
+  # (#28; test-depth.R).
   deep <- paste0(strrep("[", 300), strrep("]", 300))
 
   err <- tryCatch(yaml_parse(deep, max_depth = 10), zuyaml_error = identity)

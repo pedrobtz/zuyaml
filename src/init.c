@@ -27,6 +27,8 @@ static const R_CallMethodDef call_methods[] = {
     { NULL, NULL, 0 }
 };
 
+void R_init_zuyaml(DllInfo* dll); /* R calls it by name; no header declares it */
+
 void attribute_visible R_init_zuyaml(DllInfo* dll)
 {
     R_registerRoutines(dll, NULL, call_methods, NULL, NULL);

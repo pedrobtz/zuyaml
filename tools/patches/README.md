@@ -174,3 +174,33 @@ are needed, and they close different halves of the same defect.
 **Worth reporting upstream:** it is a real defect independent of zuyaml.
 Any caller that builds a document containing a multi-line string and emits it
 gets a different string back.
+
+## 0006-flow-depth-limit.patch
+
+**Why it is required:** `stale_simple_keys()` in `cyaml_parser.c` walks one
+possible simple key per open flow level on every token, so the scan costs
+O(tokens × flow depth). libyaml has the same shape. Unbounded, 80 KB of `[`
+took 10 seconds and the 64 MB `max_size` default allows hours (#28).
+`cyaml_opts_t.max_depth` exists upstream but is never read, and zuyaml's own
+depth check runs during conversion, after the cost has been paid.
+
+**What it does:** the scanner copies `opts->max_depth` and
+`increase_flow_level()` refuses to open a flow collection when `max_depth`
+flow levels are already open. The failure gets a new error code,
+`CYAML_ERR_DEPTH`, appended to `cyaml_err_t` so that no existing value moves,
+and a `cyaml_strerror()` string. `zuyaml_err_code()` maps it to
+`"limit_depth"`, the code conversion already raised.
+
+**Why it changes no result:** every collection counts towards zuyaml's depth,
+block or flow, so a document with more than `max_depth` open flow levels was
+already refused during conversion. Only the moment changes, and the condition
+now carries the line and column of the bracket that crossed the limit.
+`max_depth = 0` disables the check, as it disables zuyaml's, and leaves the
+quadratic cost in place.
+
+**Block nesting is not affected:** the indentation stack is popped in amortised
+constant time, and block nesting is bounded by `max_size` anyway, since each
+level costs at least one more column of indentation.
+
+**Worth reporting upstream:** honouring the option it already declares closes
+the same exposure for every caller.

@@ -12,22 +12,6 @@
 # CRAN. CI raises it via ZUYAML_FUZZ, and runs the same tests again under
 # AddressSanitizer, where a leak on the error path becomes visible.
 
-fuzz_iterations <- function(default = 200L) {
-  n <- suppressWarnings(as.integer(Sys.getenv("ZUYAML_FUZZ", "")))
-  if (is.na(n) || n <= 0L) default else n
-}
-
-parse_quietly <- function(bytes) {
-  tryCatch(
-    {
-      yaml_parse_all(bytes, max_depth = 64, max_nodes = 1e5)
-      "ok"
-    },
-    zuyaml_error = function(e) "condition",
-    error = function(e) paste0("bare R error: ", conditionMessage(e))
-  )
-}
-
 test_that("random bytes never escape as anything but a condition", {
   set.seed(20260908L)
   n <- fuzz_iterations()

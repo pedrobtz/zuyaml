@@ -36,6 +36,8 @@ const char* zuyaml_err_code(cyaml_err_t code)
         return "duplicate_key";
     case CYAML_ERR_IO:
         return "io";
+    case CYAML_ERR_DEPTH: /* added by tools/patches/0006 */
+        return "limit_depth";
     }
     /* Reached only if upstream adds a code. Fail loudly rather than
        silently bucketing it as something else. */

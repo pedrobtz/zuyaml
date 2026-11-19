@@ -45,6 +45,11 @@ Emission favours readable YAML over reproducing any particular source
 formatting. Comments, quoting style and flow-versus-block choices are not
 preserved; see \code{vignette("zuyaml")} for the conversions that do not round
 trip.
+
+There is no depth limit: \code{x} is an R object, already in memory. A list
+nested deeper than the C stack allows raises R's \code{stackOverflowError}, and
+output longer than an R string can hold (2^31 - 1 bytes) is an error with
+\code{code} \code{"limit_size"}.
 }
 \examples{
 cat(yaml_emit(list(host = "localhost", port = 8080L)))

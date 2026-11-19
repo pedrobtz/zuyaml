@@ -3,18 +3,6 @@
 # must stay in agreement. They are cheap and they fail loudly after a botched
 # re-vendor, which is exactly when it matters.
 
-version_record <- function() {
-  path <- system.file("cyaml-VERSION", package = "zuyaml")
-  expect_true(nzchar(path))
-  readLines(path, warn = FALSE)
-}
-
-field <- function(record, name) {
-  line <- grep(paste0("^", name, ":"), record, value = TRUE)
-  expect_length(line, 1)
-  trimws(sub(paste0("^", name, ":"), "", line[[1]]))
-}
-
 test_that("the compiled cyaml version matches inst/cyaml-VERSION", {
   recorded <- sub("^v", "", field(version_record(), "version"))
   expect_identical(cyaml_version(), recorded)

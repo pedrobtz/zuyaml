@@ -1,0 +1,47 @@
+# Guards the vendored cyaml sources (#9).
+#
+# The vendored files share src/ with zuyaml's own on purpose (CLAUDE.md,
+# Architecture), so `paths` names them by glob rather than by directory.
+#
+# Two checks, from pedrobtz/r-actions' vendor.yml:
+#
+#   * tools/verify-vendor rebuilds src/cyaml* from the pinned upstream commit
+#     plus tools/patches/ and requires it byte for byte. That is the actual
+#     invariant: the tree is reproducible from upstream and the recorded
+#     patches. A hand edit fails here even if everything else was updated.
+#   * a pull request that changes src/cyaml* must also change the record of
+#     how it was produced: a patch, the vendoring script, or the provenance
+#     file it writes.
+#
+# Staleness (a new cyaml release) is a separate question, tracked upstream as
+# pedrobtz/r-actions#23.
+
+on:
+  # No `push:`: a pull request already checks its merge with main,
+  # and the schedule checks main (r-actions README, "Pushes to main").
+  pull_request:
+  schedule:
+    - cron: "38 5 * * 1"
+  workflow_dispatch:
+
+name: vendor.yaml
+
+permissions:
+  contents: read
+
+jobs:
+  vendor:
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:vendor'))
+    uses: pedrobtz/r-actions/.github/workflows/vendor.yml@v1
+    with:
+      paths: |
+        src/cyaml*.c
+        src/cyaml*.h
+      verify: tools/verify-vendor
+      must-update: |
+        tools/patches/ | tools/vendor-cyaml.sh | inst/cyaml-VERSION

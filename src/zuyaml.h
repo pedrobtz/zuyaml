@@ -40,11 +40,17 @@ const char* zuyaml_err_code(cyaml_err_t code);
 _Noreturn void zuyaml_stop_parse_error(
     const cyaml_error_t* err, SEXP path);
 
+/* R's own printf-format attribute (R_ext/Print.h), as Rf_error() carries, so
+   the compiler checks every call's arguments against its format string. */
+#ifndef R_PRINTF_FORMAT
+#define R_PRINTF_FORMAT(M, N)
+#endif
+
 _Noreturn void zuyaml_stopf(
-    const char* code, SEXP path, const char* fmt, ...);
+    const char* code, SEXP path, const char* fmt, ...) R_PRINTF_FORMAT(3, 4);
 
 _Noreturn void zuyaml_stopf_at(const char* code, SEXP path,
-    const cyaml_span_t* span, const char* fmt, ...);
+    const cyaml_span_t* span, const char* fmt, ...) R_PRINTF_FORMAT(4, 5);
 
 /* Locate a byte offset in `src` as a 1-based line and column. */
 cyaml_span_t zuyaml_span_at(const char* src, size_t off);
