@@ -1,7 +1,5 @@
 # R -> YAML conversion.
 
-emitted <- function(x, ...) sub("\n$", "", yaml_emit(x, ...))
-
 test_that("scalars emit with core-schema spellings", {
   expect_identical(emitted(NULL), "null")
   expect_identical(emitted(TRUE), "true")
