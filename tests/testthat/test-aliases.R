@@ -61,8 +61,8 @@ test_that("the node budget stops alias expansion bombs", {
 })
 
 test_that("max_nodes is validated", {
-  expect_error(yaml_parse("a: 1", max_nodes = -1), "non-negative")
-  expect_error(yaml_parse("a: 1", max_nodes = NA), "non-negative")
+  expect_identical(error_code(yaml_parse("a: 1", max_nodes = -1)), "invalid_input")
+  expect_identical(error_code(yaml_parse("a: 1", max_nodes = NA)), "invalid_input")
   expect_identical(yaml_parse("a: 1", max_nodes = 0), list(a = 1L)) # unlimited
 })
 

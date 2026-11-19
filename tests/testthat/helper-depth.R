@@ -20,6 +20,9 @@ nest <- function(shape, d) {
     block_then_flow = {
       b <- d %/% 2L
       f <- d - b
+      if (b == 0L) {
+        return(paste0(strrep("[", f), "1", strrep("]", f)))
+      }
       paste0(
         paste0(strrep("  ", seq_len(b) - 1L), "a:", collapse = "\n"), " ",
         strrep("[", f), "1", strrep("]", f)

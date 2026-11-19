@@ -59,9 +59,9 @@ test_that("the constructor validates", {
   expect_s3_class(zuyaml_bigint(zuyaml_bigint("123")), "zuyaml_bigint")
   expect_identical(as.character(zuyaml_bigint("-7")), "-7")
 
-  expect_error(zuyaml_bigint("12x"), "decimal integers")
-  expect_error(zuyaml_bigint("1.5"), "decimal integers")
-  expect_error(zuyaml_bigint(TRUE), "character vector")
+  expect_identical(error_code(zuyaml_bigint("12x")), "invalid_input")
+  expect_identical(error_code(zuyaml_bigint("1.5")), "invalid_input")
+  expect_identical(error_code(zuyaml_bigint(TRUE)), "invalid_input")
 })
 
 test_that("zuyaml_bigint has usable methods", {

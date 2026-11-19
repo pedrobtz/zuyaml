@@ -20,10 +20,6 @@ test_that("yaml_parse_all always returns a list, one element per document", {
 
 test_that("yaml_parse rejects a stream that is not exactly one document", {
   # Trailing documents must never be silently discarded.
-  expect_error(
-    yaml_parse("---\nnull\n---\nnull\n"),
-    "contains 2 documents"
-  )
   err <- tryCatch(yaml_parse("---\nnull\n---\nnull\n"), zuyaml_error = identity)
   expect_identical(err$code, "too_many_documents")
 })
@@ -86,12 +82,31 @@ test_that("duplicate-key rejection comes from zuyaml, not cyaml", {
 })
 
 test_that("invalid arguments are refused before reaching C", {
-  expect_error(yaml_parse(1L), "single string or a raw vector")
-  expect_error(yaml_parse(c("a", "b")), "single string or a raw vector")
-  expect_error(yaml_parse(NA_character_), "single string or a raw vector")
-  expect_error(yaml_parse("null", max_depth = -1), "between 0 and 4294967295")
-  expect_error(yaml_parse("null", max_depth = 2^33), "between 0 and 4294967295")
-  expect_error(yaml_parse("null", duplicate_keys = NA), "must be TRUE or FALSE")
+  expect_identical(error_code(yaml_parse(1L)), "invalid_input")
+  expect_identical(error_code(yaml_parse(c("a", "b"))), "invalid_input")
+  expect_identical(error_code(yaml_parse(NA_character_)), "invalid_input")
+  expect_identical(error_code(yaml_parse("null", duplicate_keys = NA)),
+                   "invalid_input")
+  expect_error(yaml_parse("null", duplicate_keys = NA),
+               class = "zuyaml_error")
+})
+
+test_that("uint32 limits are accepted to their bound and no further (#36)", {
+  # Upstream stores these as uint32_t. Straddle both ends, on every argument
+  # that goes through check_uint32().
+  for (arg in c("max_depth", "max_size")) {
+    call <- function(v) error_code(do.call(yaml_parse, setNames(list("null", v), c("", arg))))
+    expect_identical(call(0), NA_character_, info = arg)
+    expect_identical(call(4294967295), NA_character_, info = arg)
+    expect_identical(call(-1), "invalid_input", info = arg)
+    expect_identical(call(4294967296), "invalid_input", info = arg)
+    expect_identical(call(NA_real_), "invalid_input", info = arg)
+    expect_identical(call(c(1, 2)), "invalid_input", info = arg)
+    expect_identical(call("1"), "invalid_input", info = arg)
+  }
+  # max_nodes is a count with no upper bound.
+  expect_identical(error_code(yaml_parse("null", max_nodes = 2^40)), NA_character_)
+  expect_identical(error_code(yaml_parse("null", max_nodes = -1)), "invalid_input")
 })
 
 test_that("max_depth is enforced", {

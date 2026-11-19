@@ -4,7 +4,7 @@
 
 test_that("max_depth trips at limit + 1 in every nesting shape (#8)", {
   for (shape in nest_shapes) {
-    for (limit in c(2L, 5L, 128L)) {
+    for (limit in c(1L, 2L, 5L, 128L)) {
       info <- paste(shape, limit)
       expect_identical(depth_result(nest(shape, limit - 1L), max_depth = limit), "ok", info = info)
       expect_identical(depth_result(nest(shape, limit), max_depth = limit), "ok", info = info)

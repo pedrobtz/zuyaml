@@ -40,7 +40,7 @@ test_that("missing files give a clear condition", {
   expect_identical(err$code, "io")
   expect_match(conditionMessage(err), "does not exist")
 
-  expect_error(yaml_read(42), "single string")
+  expect_identical(error_code(yaml_read(42)), "invalid_input")
 })
 
 test_that("UTF-8 survives the file round trip", {

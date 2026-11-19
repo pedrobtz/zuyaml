@@ -85,19 +85,23 @@ test_that("zuyaml_bigint emits as an integer", {
 
   # The class attribute is not trusted: a hand-made invalid value is refused
   # rather than quietly emitted as a string.
-  expect_error(
-    yaml_emit(structure("not-a-number", class = "zuyaml_bigint")),
-    "decimal integer"
+  expect_identical(
+    error_code(yaml_emit(structure("not-a-number", class = "zuyaml_bigint"))),
+    "invalid_input"
   )
 })
 
 test_that("ambiguous and unsupported objects are refused", {
-  expect_error(yaml_emit(list(a = 1, 2)), "partially named")
-  expect_error(yaml_emit(stats::setNames(list(1, 2), c("a", "a"))), "duplicate names")
-  expect_error(yaml_emit(data.frame(a = 1)), "Data frames")
-  expect_error(yaml_emit(yaml_parse("? [a]\n: 1\n")), "zuyaml_map")
-  expect_error(yaml_emit(sum), "Cannot emit")
-  expect_error(yaml_emit(Sys.Date()), "Cannot emit")
+  expect_identical(error_code(yaml_emit(list(a = 1, 2))), "partial_names")
+  expect_identical(
+    error_code(yaml_emit(stats::setNames(list(1, 2), c("a", "a")))),
+    "duplicate_key"
+  )
+  expect_identical(error_code(yaml_emit(data.frame(a = 1))), "unsupported_type")
+  expect_identical(error_code(yaml_emit(yaml_parse("? [a]\n: 1\n"))),
+                   "unsupported_type")
+  expect_identical(error_code(yaml_emit(sum)), "unsupported_type")
+  expect_identical(error_code(yaml_emit(Sys.Date())), "unsupported_type")
 })
 
 test_that("formatting options are validated and applied", {
@@ -106,9 +110,19 @@ test_that("formatting options are validated and applied", {
   expect_match(yaml_emit(list(a = 1L), document_end = TRUE), "\\.\\.\\.")
 
   # indent and width are uint8_t upstream; width = 1000 would silently wrap.
-  expect_error(yaml_emit(1L, width = 1000), "between 0 and 255")
-  expect_error(yaml_emit(1L, indent = 0), "between 1 and 255")
-  expect_error(yaml_emit(1L, indent = NA), "between 1 and 255")
+  # Both ends of each range, and one past them (#36).
+  emit_code <- function(...) error_code(yaml_emit(list(a = 1L), ...))
+  expect_identical(emit_code(indent = 1), NA_character_)
+  expect_identical(emit_code(indent = 255), NA_character_)
+  expect_identical(emit_code(indent = 0), "invalid_input")
+  expect_identical(emit_code(indent = 256), "invalid_input")
+  expect_identical(emit_code(indent = NA), "invalid_input")
+  expect_identical(emit_code(width = 0), NA_character_)
+  expect_identical(emit_code(width = 255), NA_character_)
+  expect_identical(emit_code(width = -1), "invalid_input")
+  expect_identical(emit_code(width = 256), "invalid_input")
+  expect_identical(emit_code(width = 1000), "invalid_input")
+  expect_identical(emit_code(document_start = NA), "invalid_input")
 })
 
 test_that("yaml_emit_all produces a parseable stream", {
@@ -117,7 +131,7 @@ test_that("yaml_emit_all produces a parseable stream", {
   expect_match(out, "---")
   expect_identical(yaml_parse_all(out), list(list(a = 1L), list(b = 2L)))
   expect_identical(yaml_emit_all(list()), "")
-  expect_error(yaml_emit_all(42L), "must be a list")
+  expect_identical(error_code(yaml_emit_all(42L)), "invalid_input")
 })
 
 test_that("nested structures round-trip", {
