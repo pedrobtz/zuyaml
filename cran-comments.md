@@ -33,7 +33,7 @@ byte.
 GitHub Actions, through the pedrobtz/r-actions reusable workflows:
 
 * runners: ubuntu-latest (R release and R oldrel-1), macOS-latest (R
-  release), windows-latest (R release)
+  release), windows-latest (R release and R devel)
 * R-hub containers on R devel: `clang23`, `ubuntu-clang` and `ubuntu-gcc16`,
   compiled as the corresponding CRAN flavors are (C as `-std=gnu23` with
   `-pedantic`), plus the `nosuggests` and `nold` configurations
@@ -47,3 +47,9 @@ untrusted input.
 ## Reverse dependencies
 
 There are no reverse dependencies on CRAN.
+
+## Method references
+
+There are no published references describing the methods in this package. It
+implements the YAML 1.2 specification (<https://yaml.org/spec/1.2.2/>), which
+is cited in the DESCRIPTION.

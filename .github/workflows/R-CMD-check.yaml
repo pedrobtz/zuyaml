@@ -57,3 +57,11 @@ jobs:
       # integral, and emitting one so that it parses back unchanged.
       nosuggests: true
       nold: true
+      # The shared default plus Windows R-devel, which no container covers
+      # and CRAN checks (r-windows-x86_64-devel). Full profile only.
+      runners: >-
+        [{"os": "macos-latest", "r": "release"},
+         {"os": "windows-latest", "r": "release"},
+         {"os": "windows-latest", "r": "devel"},
+         {"os": "ubuntu-latest", "r": "release"},
+         {"os": "ubuntu-latest", "r": "oldrel-1"}]
