@@ -84,3 +84,16 @@ test_that("nesting deeper than the C stack is an R error, not a crash (#8)", {
   expect_identical(yaml_parse("a: [1, 2]"), list(a = list(1L, 2L)))
   expect_identical(yaml_emit(list(a = 1L)), "a: 1\n")
 })
+
+test_that("a document both too deep and invalid reports limit_depth (#34)", {
+  # The scanner stops at the first bracket past max_depth, before the later
+  # syntax error is reached. 0.1.0 reported "syntax" here.
+  doc <- "- [[[[1]]]]\n- {a: 1, b: 2"
+  err <- tryCatch(yaml_parse(doc, max_depth = 3), zuyaml_error = identity)
+  expect_s3_class(err, "zuyaml_parse_error")
+  expect_identical(err$code, "limit_depth")
+  expect_identical(err$line, 1L)
+  # Within the limit, the syntax error is what is reported.
+  err <- tryCatch(yaml_parse(doc, max_depth = 10), zuyaml_error = identity)
+  expect_identical(err$code, "syntax")
+})
