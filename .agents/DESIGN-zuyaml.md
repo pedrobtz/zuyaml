@@ -177,6 +177,13 @@ cyaml*. The risk is on our side: a recursive R conversion of such a document
 exhausts R's protection stack. Enforcing depth during conversion addresses
 both.
 
+It is a *time* risk inside cyaml, though (2026-11-19, #28). The scanner checks
+every open flow level's possible simple key on every token, so scanning costs
+O(tokens × flow depth): 80 KB of `[` took 10 seconds, and conversion's depth
+check only runs after that. Patch 0006 makes the scanner honour
+`opts.max_depth` for flow collections, so the cost is bounded by
+O(tokens × `max_depth`); see §11.2.
+
 **The emitter does not quote ambiguous numerics.** `needs_quoting_ex()` in
 `cyaml_emitter.c` promotes a plain scalar to double-quoted for flow indicators,
 leading indicators, `---`/`...`, trailing `:`, line breaks, ` #`, `: `, and the
@@ -1180,6 +1187,31 @@ YAML document exceeds the node limit (10000000); see max_nodes.
 ```
 
 ### 11.2 Other hard limits
+
+**Nesting depth and the C stack** (2026-11-19, #8, #28). Two recursions use
+the C stack: converting a parsed document (`convert_node()`) and building one
+from an R object (`build_node()`). cyaml's parser and emitter are both
+iterative. Measured with `tools/ci/stack-depth.sh`, conversion costs 160 to 200
+bytes of stack per level and building about 100, so the default `max_depth` of
+128 trips first by a factor of about 390 on an 8 MB stack, 46 on 1 MB and 9.6
+on 256 KB. The factor must stay at least 4; `hardening.yaml` checks it on every
+pull request. Two cases have no depth limit to protect them, `max_depth = 0`
+and `yaml_emit()`, which takes an R object rather than text. For them, each
+level calls `R_CheckStack()`, so running out of stack is R's
+`stackOverflowError` rather than a segfault. That error unwinds safely because
+the stream and the document under construction are owned by external pointers
+(§9.3).
+
+`max_depth` also bounds parse time, through patch 0006: the scanner refuses to
+open a flow collection beyond it, with `CYAML_ERR_DEPTH` mapped to
+`"limit_depth"`, the code conversion raises. Every collection counts towards
+zuyaml's depth, so a document the scanner refuses was already refused, only
+later. `max_depth = 0` restores the quadratic cost and is for trusted input.
+
+**Emitted size.** An R string holds at most 2^31 - 1 bytes. Longer emitted
+output, such as 50,000 levels of block indentation (2.5 GB), raises
+`"limit_size"`. The output buffer is owned by an external pointer from the
+moment cyaml returns it, so the error does not leak it.
 
 **4 GiB ceiling.** `cyaml_span_t.off`/`len`, `cyaml_stream_t.src_len`, and
 `cyaml_opts_t.max_size` are all `uint32_t`, even though `cyaml_parse_stream()`

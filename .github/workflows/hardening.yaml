@@ -25,7 +25,22 @@ name: hardening.yaml
 permissions: read-all
 
 jobs:
+  # The r-actions gate: skips the jobs below on a documentation-only change
+  # and honours the ci:docs, ci:minimal and skip-ci:hardening labels.
+  changes:
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:hardening'))
+    uses: pedrobtz/r-actions/.github/workflows/changes.yml@v1
+    with:
+      name: hardening
+
   full-test-suite:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: full yaml-test-suite
 
@@ -59,6 +74,8 @@ jobs:
         run: Rscript tools/conformance.R "${{ runner.temp }}/yaml-test-suite"
 
   fuzz:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: wrapper fuzzing
 
@@ -80,3 +97,33 @@ jobs:
 
       - name: Fuzz the parser
         run: Rscript tools/ci-run-tests.R fuzz
+
+  # Nesting depth against the C stack (#8): the default max_depth must trip
+  # first, and running out of stack must be an R error, never a crash. Needs
+  # a shell-level `ulimit -s`, which R cannot set for itself, so it lives
+  # here rather than in tests/. tools/ci/stack-depth.R says what it checks
+  # and reports the measured margin.
+  stack:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
+    runs-on: ubuntu-latest
+    name: nesting depth under 8 MB, 1 MB and 256 KB stacks
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+
+      - name: Install zufast
+        run: Rscript -e 'install.packages("zufast")'
+
+      # --large-output emits a 2.5 GB document, which must be refused with
+      # limit_size; the runner has the memory for it.
+      - name: Depth and stack
+        run: tools/ci/stack-depth.sh --large-output

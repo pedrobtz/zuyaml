@@ -60,7 +60,11 @@ refuse a great deal of ordinary YAML.}
 keys is an error. If \code{TRUE}, duplicates become duplicate names in the
 resulting list.}
 
-\item{max_depth}{Maximum nesting depth, or \code{0} for unlimited.}
+\item{max_depth}{Maximum nesting depth, or \code{0} for unlimited. It bounds
+parse time as well as depth, because the time to scan flow collections
+(\verb{[...]}, \code{{...}}) grows with the square of their nesting depth, so keep
+\code{0} for trusted input. A document nested deeper than the C stack allows
+raises R's \code{stackOverflowError} rather than crashing.}
 
 \item{max_size}{Maximum input size in bytes, or \code{0} for unlimited.}
 

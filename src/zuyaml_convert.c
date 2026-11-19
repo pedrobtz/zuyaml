@@ -1134,6 +1134,12 @@ SEXP zuyaml_convert_node(const cyaml_doc_t* doc, const cyaml_node_t* node,
                 check_unknown_tag(ctx, node, tag, tag_n);
             }
         }
+        /* max_depth bounds this recursion, with a wide margin (#8), but
+           max_depth = 0 lifts the bound, and a stack can be small (a thread,
+           an embedded R). R_CheckStack() makes running out an R error, not a
+           crash; the stream is owned by an external pointer, so the unwind
+           is safe (design 9.3). cyaml's parser itself is iterative. */
+        R_CheckStack();
         ctx->depth++;
         out = (node->type == CYAML_SEQ) ? convert_seq(doc, node, ctx, anc)
                                         : convert_map(doc, node, ctx, anc);
